@@ -49,6 +49,7 @@ component singleton {
 			if( matchedToHere == len( buffer ) && len( buffer ) ) {
 				// Suggest a trailing space
 				candidates.add( buffer & ' ' );
+				arraySort( candidates, 'text' );
 				return 0;
 			// Everything else in the buffer is a partial, unmached command
 			} else if( len( buffer ) ) {
@@ -75,8 +76,10 @@ component singleton {
 
 				// Did we find ANYTHING?
 				if( candidates.size() ) {
+					arraySort( candidates, 'text' );
 					return matchedToHere;
 				} else {
+					arraySort( candidates, 'text' );
 					return len( buffer );
 				}
 
@@ -86,7 +89,7 @@ component singleton {
 				// This is all the possible params for the command
 				var definedParameters = commandInfo.commandReference.parameters;
 				// This is the params the user has entered so far.
-				var passedParameters = commandService.parseParameters( commandInfo.parameters );
+				var passedParameters = commandService.parseParameters( commandInfo.parameters, definedParameters );
 			
 				// For sure we are using named- suggest name or value as necceessary
 				if( structCount( passedParameters.namedParameters ) ) {
@@ -121,6 +124,7 @@ component singleton {
 							}
 							// Fill in possible param values based on the type and contents so far.
 							paramValueCompletion( commandInfo, paramName, paramType, paramSoFar, candidates );
+							arraySort( candidates, 'text' );
 							return len( buffer ) - len( paramSoFar );
 
 						}
@@ -145,6 +149,7 @@ component singleton {
 					} // Loop over possible params
 
 					// Back up a bit to the beginning of the left over text we're replacing
+					arraySort( candidates, 'text' );
 					return len( buffer ) - len( leftOver ) - iif( !len( leftOver ) && !buffer.endsWith( ' ' ), 0, 1 );
 
 				// For sure positional - suggest next param name and value
@@ -183,7 +188,8 @@ component singleton {
 								break;
 							}
 						}
-														
+						
+						arraySort( candidates, 'text' );								
 						return len( buffer );
 
 
@@ -215,6 +221,7 @@ component singleton {
 								}
 							}
 							
+							arraySort( candidates, 'text' );
 							return len( buffer ) - len( partialMatch );
 						}
 					}
@@ -256,7 +263,8 @@ component singleton {
 
 						// Suggest its value
 						paramValueCompletion( commandInfo, thisParam.name, thisParam.type, partialMatch, candidates );
-
+						
+						arraySort( candidates, 'text' );
 						return len( buffer ) - len( partialMatch );
 
 					}  // End are there params defined
@@ -267,6 +275,8 @@ component singleton {
 
 			} // End was the command found
 
+
+			arraySort( candidates, 'text' );
 			return len( buffer );
 
 		} catch ( any e ) {
@@ -347,23 +357,18 @@ component singleton {
 	 * @type.showFiles Whether to hit files as well as directories
  	 **/
 	private function pathCompletion(String startsWith, required candidates, showFiles=true ) {
-		// This is what we add to relative paths, with the slashes normalized
-		var relativeRootPath = replace( shell.pwd() & '/', "\", "/", "all" );
-
-		// Keep track of whether this is a relative path or not.
-		var isRelative = false;
-
-		// Note, I'm NOT using fileSystemUtil.resolvePath() here because I don't want the
-		// path canoncalized since that will break my text comparisons.  Leave the ../ stuff in
-		var oPath = createObject( 'java', 'java.io.File' ).init( arguments.startsWith );
-		if( !oPath.isAbsolute() ) {
-			isRelative = true;
-			// If it's relative, we assume it's relative to the current working directory and make it absolute
-			arguments.startsWith = 	relativeRootPath & arguments.startsWith;
-		}
-
-		// This is out absolute directory as typed by the user
+		
+		// keep track of the original here so we can put it back like the user had
+		var originalStartsWith = replace( arguments.startsWith, "\", "/", "all" );
+		// Fully resolve the path.
+		arguments.startsWith = fileSystemUtil.resolvePath( arguments.startsWith );
 		startsWith = replace( startsWith, "\", "/", "all" );
+		
+		// make sure dirs are suffixed with a trailing slash or we'll strip it off, thinking it's a partial name
+		if( ( originalStartsWith == '' || originalStartsWith.endsWith( '/' ) ) && !startsWith.endsWith( '/' ) ) {
+			startsWith &= '/';
+		}
+		
 		// searchIn strips off partial directories, and has the last complete actual directory for searching.
 		var searchIn = startsWith;
 		// This is the bit at the end that is a partially typed directory or file name
@@ -377,7 +382,7 @@ component singleton {
 				partialMatch = replaceNoCase( startsWith, searchIn, '' );
 			}
 		}
-
+		
 		// Don't even bother if search location doesn't exist
 		if( directoryExists( searchIn ) ) {
 			// Pull a list of paths in there
@@ -400,11 +405,9 @@ component singleton {
 						// This is the absolute path that we matched
 						var thisCandidate = searchIn & ( right( searchIn, 1 ) == '/' ? '' : '/' ) & path.name;
 
-						// If we started with a relative path...
-						if( isRelative ) {
-							// ...strip it back down to what they typed
-							thisCandidate = replaceNoCase( thisCandidate, relativeRootPath, '' );
-						}
+						// ...strip it back down to what they typed
+						thisCandidate = replaceNoCase( thisCandidate, startsWith, originalStartsWith );
+						
 						// Finally add this candidate into the list
 						candidates.add( thisCandidate & ( path.type == 'dir' ? '/' : '' ) );
 					}
@@ -421,10 +424,12 @@ component singleton {
 	 * @candidates.hint tree to populate with completion candidates
  	 **/
 	private function addCandidateIfMatch( required match, required startsWith, required candidates ) {
-		match = lcase( match );
 		startsWith = lcase( startsWith );
-		if( match.startsWith( startsWith ) || len( startsWith ) == 0 ) {
-			candidates.add( match & ' ' );
+		if( lcase( match ).startsWith( startsWith ) || len( startsWith ) == 0 ) {
+			if( !match.endsWith( '=' ) ) {
+				match &= ' ';
+			}
+			candidates.add( match );
 		}
 	}
 

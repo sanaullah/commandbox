@@ -21,7 +21,7 @@ component aliases='coldbox create controller' {
 	* @directory.hint The base directory to create your handler in and creates the directory if it does not exist. Defaults to 'handlers'.
 	* @script.hint Generate content in script markup or tag markup
 	* @description.hint The handler hint description
-	* @open.hint Open the handler once generated
+	* @open.hint Open the handler (and test(s) if applicable) once generated
 	**/
 	function run(
 		required name,
@@ -112,6 +112,13 @@ component aliases='coldbox create controller' {
 		var handlerPath = '#arguments.directory#/#arguments.name#.cfc';
 		// Create dir if it doesn't exist
 		directorycreate( getDirectoryFromPath( handlerPath ), true, true );
+		
+		// Confirm it
+		if( fileExists( handlerPath ) && !confirm( "The file '#getFileFromPath( handlerPath )#' already exists, overwrite it (y/n)?" ) ){
+			print.redLine( "Exiting..." );
+			return;
+		}
+
 		// Write out the files
 		file action='write' file='#handlerPath#' mode ='777' output='#handlerContent#';
 		print.greenLine( 'Created #handlerPath#' );

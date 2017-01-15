@@ -156,10 +156,6 @@ component accessors="true" singleton {
  	 **/
 	function runCommand( required array commandChain, required string line, string piped ){
 
-		if( structKeyExists( arguments, 'piped' ) ) {
-			var result = arguments.piped;
-		}
-
 		// If nothing is returned, something bad happened (like an error instatiating the CFC)
 		if( !commandChain.len() ){
 			return 'Command not run.';
@@ -169,6 +165,12 @@ component accessors="true" singleton {
 		// default behavior is to keep trucking
 		var previousCommandSeparator = ';';
 		var lastCommandErrored = false;
+		
+		if( structKeyExists( arguments, 'piped' ) ) {
+			var result = arguments.piped;
+			previousCommandSeparator = '|';
+		}
+		
 		// If piping commands, each one will be an item in the chain.
 		// i.e. forgebox show | grep | more
 		// Would result in three separate, chained commands.
@@ -212,7 +214,7 @@ component accessors="true" singleton {
 				};
 			// For normal commands, parse them out properly
 			} else {
-				var parameterInfo = parseParameters( commandInfo.parameters );
+				var parameterInfo = parseParameters( commandInfo.parameters, commandInfo.commandReference.parameters );
 			}
 
 			// Parameters need to be ALL positional or ALL named
@@ -418,9 +420,10 @@ component accessors="true" singleton {
 	/**
 	 * Take an array of parameters and parse them out as named or positional
 	 * @parameters.hint The array of params to parse.
+	 * @commandParameters.hint valid params defined by the command
  	 **/
-	function parseParameters( parameters ){
-		return parser.parseParameters( parameters );
+	function parseParameters( parameters, commandParameters ){
+		return parser.parseParameters( parameters, commandParameters );
 	}
 
 	/**

@@ -33,6 +33,7 @@ component {
 		boolean open=false
 	){
 		// This will make each directory canonical and absolute
+		var relativeDirectory = arguments.directory;
 		arguments.directory 		= fileSystemUtil.resolvePath( arguments.directory );
 		arguments.testsDirectory	= fileSystemUtil.resolvePath( arguments.testsDirectory );
 
@@ -59,7 +60,8 @@ component {
 
 		// Start Replacings
 		interceptorContent = replaceNoCase( interceptorContent, '|Name|', arguments.name, 'all' );
-		interceptorTestContent = replaceNoCase( interceptorTestContent, "|name|", arguments.name, "all" );
+		var interceptorPath = listChangeDelims( relativeDirectory, '.', '/\').listAppend( arguments.name, '.' );
+		interceptorTestContent = replaceNoCase( interceptorTestContent, "|name|", interceptorPath, "all" );
 
 		// Placeholder in case we add this in
 		interceptorContent = replaceNoCase( interceptorContent, '|Description|', arguments.description, 'all' );
@@ -89,6 +91,13 @@ component {
 
 		// Write it out.
 		var interceptorPath = '#arguments.directory#/#arguments.name#.cfc';
+
+		// Confirm it
+		if( fileExists( interceptorPath ) && !confirm( "The file '#getFileFromPath( interceptorPath )#' already exists, overwrite it (y/n)?" ) ){
+			print.redLine( "Exiting..." );
+			return;
+		}
+		
 		file action='write' file='#interceptorPath#' mode ='777' output='#interceptorContent#';
 		print.greenLine( '#interceptorPath#' );
 

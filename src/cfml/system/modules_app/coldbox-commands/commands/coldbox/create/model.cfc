@@ -64,6 +64,10 @@ component {
 			directoryCreate( arguments.directory );
 		}
 		// Validate persistence
+		if( !len( arguments.name ) ) {
+			error( "Cannot scaffold a model with an empty name." );
+		}
+		// Validate persistence
 		if( !listFindNoCase( variables.validPersistences, arguments.persistence ) ) {
 			error( "The persistence value [#arguments.persistence#] is invalid. Valid values are [#listChangeDelims( variables.validPersistences, ', ', ',' )#]" );
 		}
@@ -163,7 +167,13 @@ component {
 		var modelPath = '#directory#/#arguments.name#.cfc';
 		// Create dir if it doesn't exist
 		directorycreate( getDirectoryFromPath( modelPath ), true, true );
-		file action='write' file='#modelPath#' mode ='777' output='#trim( modelContent )#';
+		// Prompt for override
+		if( fileExists( modelPath ) && !confirm( "The file '#getFileFromPath( modelPath )#' already exists, overwrite it (y/n)?" ) ){
+			print.redLine( "Exiting..." );
+			return;
+		}
+		// Write out file
+		fileWrite( modelPath, trim( modelContent ) );
 		print.greenLine( 'Created #modelPath#' );
 
 		if( arguments.tests ) {

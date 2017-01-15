@@ -61,8 +61,10 @@ component accessors="true" singleton {
 	* @verbose If set, it will produce much more verbose information about the package installation
 	* @force When set to true, it will force dependencies to be installed whether they already exist or not
 	* @packagePathRequestingInstallation If installing smart dependencies packages (like ColdBox modules) that are capable of being nested, this is our current level
+	* 
+	* @returns True if no errors encountered, false if things went boom.
 	**/
-	function installPackage(
+	boolean function installPackage(
 			required string ID,
 			string directory,
 			boolean save=false,
@@ -74,7 +76,7 @@ component accessors="true" singleton {
 			string packagePathRequestingInstallation = arguments.currentWorkingDirectory
 	){
 		
-		interceptorService.announceInterception( 'preInstall', { installArgs=arguments } );
+		interceptorService.announceInterception( 'preInstall', { installArgs=arguments, packagePathRequestingInstallation=packagePathRequestingInstallation } );
 				
 		// If there is a package to install, install it
 		if( len( arguments.ID ) ) {
@@ -91,7 +93,7 @@ component accessors="true" singleton {
 				var endpointData = endpointService.resolveEndpoint( arguments.ID, arguments.currentWorkingDirectory );
 			} catch( EndpointNotFound var e ) {
 				consoleLogger.error( e.message );
-				return;				
+				return false;
 			}
 			
 			consoleLogger.info( '.');
@@ -104,7 +106,7 @@ component accessors="true" singleton {
 			// but I don't want to "blow up" the console with a full error.	
 			} catch( endpointException var e ) {
 				consoleLogger.error( e.message & ' ' & e.detail );
-				return;				
+				return false;				
 			}
 			
 			// Support box.json in the root OR in a subfolder (NPM-style!)
@@ -189,8 +191,8 @@ component accessors="true" singleton {
 							var candidateBoxJSON = readPackageDescriptor( candidateInstallPath );
 							// Does the package that we found satisfy what we need?
 							if( semanticVersion.satisfies( candidateBoxJSON.version, version ) ) {
-								consoleLogger.warn( '#packageName# (#version#) is already satisifed by #candidateInstallPath# (#candidateBoxJSON.version#).  Skipping installation.' );
-								return;
+								consoleLogger.warn( '#packageName# (#version#) is already satisfied by #candidateInstallPath# (#candidateBoxJSON.version#).  Skipping installation.' );
+								return true;
 							}
 						}
 					}
@@ -242,12 +244,15 @@ component accessors="true" singleton {
 				containerBoxJSON = containerBoxJSON,
 				artifactDescriptor = artifactDescriptor,
 				ignorePatterns = ignorePatterns,
-				endpointData = endpointData								
+				endpointData = endpointData,
+				artifactPath = tmpPath,
+				packagePathRequestingInstallation = packagePathRequestingInstallation
 			};
 			interceptorService.announceInterception( 'onInstall', interceptData );
 			// Make sure these get set back into their original variables in case the interceptor changed them.
 			installDirectory = interceptData.installDirectory;
 			ignorePatterns = interceptData.ignorePatterns;
+			tmpPath = interceptData.artifactPath;
 						
 			// Else, use package type convention
 			if( !len( installDirectory ) && len( packageType ) ) {
@@ -270,6 +275,10 @@ component accessors="true" singleton {
 				// ContentBox Widget
 				} else if( packageType == 'contentbox-widgets' ) {
 					installDirectory = arguments.packagePathRequestingInstallation & '/modules/contentbox/widgets';
+					// widgets just get dumped in
+					artifactDescriptor.createPackageDirectory = false;
+					// Don't trash the widgets folder with this
+					ignorePatterns.append( '/box.json' );
 				// ContentBox themes/layouts
 				} else if( packageType == 'contentbox-themes' || packageType == 'contentbox-layouts' ) {
 					installDirectory = arguments.packagePathRequestingInstallation & '/modules/contentbox/themes';
@@ -336,12 +345,20 @@ component accessors="true" singleton {
 			// Check to see if package has already been installed. Skip unless forced.
 			// This check can only be performed for packages that get installed in their own directory.
 			if ( artifactDescriptor.createPackageDirectory && directoryExists( installDirectory ) && !arguments.force ){
-				// cleanup tmp
-				if( endpointData.endpointName != 'folder' ) {
-					directoryDelete( tmpPath, true );					
-				}
-				consoleLogger.warn("The package #packageName# is already installed at #installDirectory#. Skipping installation. Use --force option to force install.");
-				return;
+				
+				// Do an additional check and make sure the currently installed version is older than what's being requested.
+				// If there's a new version, install it anyway.
+				var alreadyInstalledBoxJSON = readPackageDescriptor( installDirectory );
+				if( isPackage( installDirectory ) && semanticVersion.isNew( alreadyInstalledBoxJSON.version, version  )  ) {
+					consoleLogger.info( "Package already installed but its version [#alreadyInstalledBoxJSON.version#] is older than the new version being installed [#version#].  Forcing a reinstall." );
+				} else {				
+					// cleanup tmp
+					if( endpointData.endpointName != 'folder' ) {
+						directoryDelete( tmpPath, true );					
+					}
+					consoleLogger.warn( "The package #packageName# is already installed at #installDirectory#. Skipping installation. Use --force option to force install." );
+					return true;
+				}				
 			}
 						
 			// Create installation directory if neccesary
@@ -473,8 +490,8 @@ component accessors="true" singleton {
 			consoleLogger.info( "No dependencies found to install, but it's the thought that counts, right?" );
 		}
 		
-		interceptorService.announceInterception( 'postInstall', { installArgs=arguments } );
-
+		interceptorService.announceInterception( 'postInstall', { installArgs=arguments, installDirectory=installDirectory } );
+		return true;
 	}
 	
 	// DRY
@@ -528,9 +545,7 @@ component accessors="true" singleton {
 			required string currentWorkingDirectory,
 			string packagePathRequestingUninstallation = arguments.currentWorkingDirectory
 	){
-					
-		interceptorService.announceInterception( 'preUninstall', { uninstallArgs=arguments } );
-				
+		
 		// In case someone types "uninstall coldbox@4.0.0"
 		var packageName = listFirst( arguments.ID, '@' );
 		
@@ -553,6 +568,9 @@ component accessors="true" singleton {
 				uninstallDirectory = fileSystemUtil.resolvePath( installPaths[ packageName ] );
 			}			
 		}
+		
+		// Wait to run this until we've decided where the package lives that's being uninstalled.		
+		interceptorService.announceInterception( 'preUninstall', { uninstallArgs=arguments, uninstallDirectory=uninstallDirectory } );
 				
 		// See if the package exists here
 		if( len( uninstallDirectory ) && directoryExists( uninstallDirectory ) ) {
@@ -1015,8 +1033,9 @@ component accessors="true" singleton {
 	* Dynamic completion for property name based on contents of box.json
 	* @directory The package root
 	* @all Pass false to ONLY suggest existing property names.  True will suggest all possible box.json properties.
+	* @asSet Pass true to add = to the end of the options
 	*/ 	
-	function completeProperty( required directory, all=false ) {
+	function completeProperty( required directory, all=false, asSet=false ) {
 		var props = [];
 		
 		// Check and see if box.json exists
@@ -1027,6 +1046,9 @@ component accessors="true" singleton {
 				var boxJSON = readPackageDescriptorRaw( arguments.directory );
 			}
 			props = JSONService.addProp( props, '', '', boxJSON );			
+		}
+		if( asSet ) {
+			props = props.map( function( i ){ return i &= '='; } );
 		}
 		return props;		
 	}

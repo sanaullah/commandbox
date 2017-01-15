@@ -27,6 +27,12 @@
  * server list myApp,contentbox,testSite
  * {code}
  * .
+ * If you provide a single name, it will be treated as a partial match and return server names that contain that phrase
+ * .
+ * {code:bash}
+ * # Returns servers named "client1" and "client2"
+ * server list client
+ * {code}
  **/
 component {
 
@@ -69,7 +75,7 @@ component {
 			var status = serverService.isServerRunning( thisServerInfo ) ? 'running' : 'stopped';
 
 			// Check name and status filters.  By default, everything shows
-			if( ( !len( arguments.name ) || listFindNoCase( arguments.name, thisServerInfo.name ) )
+			if( ( !len( arguments.name ) || matchesName( thisServerInfo.name, arguments.name ) )
 				&& ( !len( statusList ) || listFindNoCase( statusList, status ) ) ) {
 
 				// Null Checks, to guarnatee correct struct.
@@ -80,12 +86,19 @@ component {
 					.bold( status, statusColors.keyExists( status ) ? statusColors[ status ] : 'yellow' )
 					.bold( ')' )
 					.line();
-
+				
 				if( arguments.verbose ) {
 
-					print.indentedLine( "host:             " & thisServerInfo.host )
-						.indentedLine( "webroot:          " & thisServerInfo.webroot )
-						.indentedLine( "HTTPEnable:       " & thisServerInfo.HTTPEnable )
+					print.indentedLine( "host:             " & thisServerInfo.host );					
+					if( len( thisServerInfo.engineName ) ) {
+						print.indentedLine( "CF Engine:        " & thisServerInfo.engineName & ' ' & serverInfo.engineVersion );
+					}
+					if( len( thisServerInfo.WARPath ) ) {
+						print.indentedLine( "WARPath:          " & thisServerInfo.WARPath );
+					} else {
+						print.indentedLine( "webroot:          " & thisServerInfo.webroot );
+					}
+					print.indentedLine( "HTTPEnable:       " & thisServerInfo.HTTPEnable )
 						.indentedLine( "port:             " & thisServerInfo.port )
 						.indentedLine( "SSLEnable:        " & thisServerInfo.SSLEnable )
 						.indentedLine( "SSLport:          " & thisServerInfo.SSLport )
@@ -95,8 +108,6 @@ component {
 						.indentedLine( "debug:            " & thisServerInfo.debug )
 						.indentedLine( "ID:               " & thisServerInfo.id );
 
-					if( len( thisServerInfo.cfengine ) ) { print.indentedLine( "cfengine:         " & thisServerInfo.cfengine ); }
-					if( len( thisServerInfo.WARPath ) ) { print.indentedLine( "WARPath:          " & thisServerInfo.WARPath ); }
 					if( len( thisServerInfo.libDirs ) ) { print.indentedLine( "libDirs:          " & thisServerInfo.libDirs ); }
 					if( len( thisServerInfo.webConfigDir ) ) { print.indentedLine( "webConfigDir:     " & thisServerInfo.webConfigDir ); }
 					if( len( thisServerInfo.serverConfigDir ) ) { print.indentedLine( "serverConfigDir:  " & thisServerInfo.serverConfigDir ); }
@@ -112,7 +123,14 @@ component {
 					if( thisServerInfo.SSLEnable ) {
 						print.indentedLine( 'https://' & thisServerInfo.host & ':' & thisServerInfo.SSLport );
 					}
-					print.indentedLine( thisServerInfo.webroot );
+					if( len( thisServerInfo.engineName ) ) {
+						print.indentedLine( 'CF Engine: ' & thisServerInfo.engineName & ' ' & thisServerInfo.engineVersion );
+					}
+					if( len( thisServerInfo.warPath ) ) {
+						print.indentedLine( 'WAR Path: ' & thisServerInfo.warPath );
+					} else {
+						print.indentedLine( 'Webroot: ' & thisServerInfo.webroot );
+					}
 				}// end verbose
 
 			} // End "filter" if
@@ -121,6 +139,14 @@ component {
 		// No servers found, then do nothing
 		if( structCount( servers ) eq 0 ){
 			print.boldRedLine( "No server configurations found!" );
+		}
+	}
+
+	function matchesName( name, searchTerm ) {
+		if( listLen( searchTerm ) > 1 ) {
+			return listFindNoCase( searchTerm, name );
+		} else {
+			return findNoCase( searchTerm, name );
 		}
 	}
 

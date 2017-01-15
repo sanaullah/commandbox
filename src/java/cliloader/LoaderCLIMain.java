@@ -295,11 +295,11 @@ public class LoaderCLIMain{
 				}
 				if( cliPropFile.isFile() ) {
 					Properties userProps = new Properties();
-					FileInputStream fi;
+					InputStream fi;
 					try {
 						log.debug( "checking for home in properties from "
 								+ cliPropFile.getCanonicalPath() );
-						fi = new FileInputStream( cliPropFile );
+						fi = new BOMInputStream( new FileInputStream( cliPropFile ), false );
 						userProps.load( fi );
 						fi.close();
 						if( mapGetNoCase( userProps, "cli.home" ) != null ) {
@@ -476,7 +476,7 @@ public class LoaderCLIMain{
 		if( cliPropFile.isFile() ) {
 			log.debug( "merging properties from "
 					+ cliPropFile.getCanonicalPath() );
-			FileInputStream fi = new FileInputStream( cliPropFile );
+			InputStream fi = new BOMInputStream( new FileInputStream( cliPropFile ), false );
 			userProps.load( fi );
 			fi.close();
 			props = mergeProperties( props, userProps );
@@ -497,8 +497,7 @@ public class LoaderCLIMain{
 		}
 
 		if( new File( cli_home, "cli.properties" ).isFile() ) {
-			FileInputStream fi = new FileInputStream( new File( cli_home,
-					"cli.properties" ) );
+			InputStream fi = new BOMInputStream( new FileInputStream( new File( cli_home, "cli.properties" ) ), false );
 			userProps.load( fi );
 			fi.close();
 			props = mergeProperties( props, userProps );
@@ -597,6 +596,7 @@ public class LoaderCLIMain{
 		File libDir = getLibDir();
 		props.setProperty( "cfml.cli.lib", libDir.getAbsolutePath() );
 		File cfmlDir = new File( cli_home.getPath() + "/cfml" );
+		File cfmlSystemDir = new File( cli_home.getPath() + "/cfml/system" );
 
 		// clean out any leftover pack files (an issue on windows)
 		Util.cleanUpUnpacked( libDir );
@@ -606,7 +606,7 @@ public class LoaderCLIMain{
 			if( !versionFileMatches( versionFile, VERSION_PROPERTIES_PATH ) ) {
 				String autoUpdate = props.getProperty( "cfml.cli.autoupdate" );
 				if( autoUpdate != null && Boolean.parseBoolean( autoUpdate ) ) {
-					log.warn( "\n*updating installed version" );
+					log.warn( "\n*updating installed jars" );
 					updateLibs = true;
 					versionFile.delete();
 				} else {
@@ -622,21 +622,23 @@ public class LoaderCLIMain{
 			System.out.println( "Library path: " + libDir );
 			System.out
 					.println( "Initializing libraries -- this will only happen once, and takes a few seconds..." );
+			
+			// Try to delete the Runwar jar first since it's the most likely to be locked.  
+			// If it fails, this method will just abort before we get any farther into deleting stuff.
+			Util.checkIfJarsLocked( libDir, "runwar" );
+			// Ok, try deleting for real.  If any of these jars fail to delete, we'll still holler at the user and abort the upgrade
 			Util.removePreviousLibs( libDir );
+			
 			Util.unzipInteralZip( classLoader, LIB_ZIP_PATH, libDir, debug );
+			
+			// Wipe out existing /cfml/system folder to remove any deleted files
+			if( cfmlSystemDir.exists() ) {
+				Util.deleteDirectory( cfmlSystemDir );
+			}
 			Util.unzipInteralZip( classLoader, CFML_ZIP_PATH, cfmlDir, debug );
+			
 			Util.unzipInteralZip( classLoader, ENGINECONF_ZIP_PATH, new File(
 					cli_home.getPath() + "/engine" ), debug );
-			Util.copyInternalFile( classLoader, "resource/trayicon.png",
-					new File( libDir, "trayicon.png" ) );
-			Util.copyInternalFile( classLoader, "resource/traymenu-adobe.json",
-					new File( libDir, "traymenu-adobe.json" ) );
-			Util.copyInternalFile( classLoader, "resource/traymenu-railo.json",
-					new File( libDir, "traymenu-railo.json" ) );
-			Util.copyInternalFile( classLoader, "resource/traymenu-lucee.json",
-					new File( libDir, "traymenu-lucee.json" ) );
-			Util.copyInternalFile( classLoader, "resource/traymenu-default.json",
-					new File( libDir, "traymenu-default.json" ) );
 			Util.copyInternalFile( classLoader, VERSION_PROPERTIES_PATH,
 					new File( libDir, "version.properties" ) );
 			System.out.println( "" );
@@ -656,8 +658,13 @@ public class LoaderCLIMain{
 				if( autoUpdate != null && Boolean.parseBoolean( autoUpdate ) ) {
 					log.warn( "\n*updating installed CFML" );
 					versionFile.delete();
-					Util.unzipInteralZip( classLoader, CFML_ZIP_PATH, cfmlDir,
-							debug );
+
+					// Wipe out existing /cfml/system folder to remove any deleted files
+					if( cfmlSystemDir.exists() ) {
+						Util.deleteDirectory( cfmlSystemDir );
+					}
+					
+					Util.unzipInteralZip( classLoader, CFML_ZIP_PATH, cfmlDir, debug );
 				} else {
 					log.warn( "run '" + name + " -update' to install new CFML" );
 				}
