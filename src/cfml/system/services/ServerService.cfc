@@ -422,12 +422,24 @@ component accessors="true" singleton {
 		// If the last port we used is taken, remove it from consideration.
 		if( serverInfo.port == 0 || !isPortAvailable( serverInfo.host, serverInfo.port ) ) { serverInfo.delete( 'port' ); }
 		// Port is the only setting that automatically carries over without being specified since it's random.
-		serverInfo.port 			= serverProps.port 				?: serverJSON.web.http.port			?: serverInfo.port 							?: getRandomPort( serverInfo.host );
+		serverInfo.port 			= serverProps.port 				?: serverJSON.web.http.port			?: serverInfo.port	?: defaults.web.http.port;
+		// Server default is 0 not null.
+		if( serverInfo.port == 0 ) {
+			serverInfo.port = getRandomPort( serverInfo.host );
+		}
 		
 		// Double check that the port in the user params or server.json isn't in use
 		if( !isPortAvailable( serverInfo.host, serverInfo.port ) ) {
 			consoleLogger.error( "." );
-			consoleLogger.error( "You asked for port [#( serverProps.port ?: serverJSON.web.http.port ?: '?' )#] in your #( serverProps.keyExists( 'port' ) ? 'start params' : 'server.json' )# but it's already in use so I'm ignoring it and choosing a random one for you." );
+			var badPortlocation = 'config';
+			if( serverProps.keyExists( 'port' ) ) {
+				badPortlocation = 'start params';
+			} else if ( len( defaults.web.http.port ?: '' ) ) {
+				badPortlocation = 'server.json';
+			} else {
+				badPortlocation = 'config server defaults';				
+			}
+			consoleLogger.error( "You asked for port [#( serverProps.port ?: serverJSON.web.http.port ?: defaults.web.http.port ?: '?' )#] in your #badPortlocation# but it's already in use so I'm ignoring it and choosing a random one for you." );
 			consoleLogger.error( "." );
 			serverInfo.port = getRandomPort( serverInfo.host );
 		}
@@ -564,7 +576,7 @@ component accessors="true" singleton {
 		var launchUtil 	= java.LaunchUtil;
 		
 	    // Default java agent for embedded Lucee engine
-	    var javaagent = serverinfo.cfengine contains 'lucee' ? '"-javaagent:#libdir#/lucee-inst.jar"' : '';
+	    var javaagent = serverinfo.cfengine contains 'lucee' ? '-javaagent:#libdir#/lucee-inst.jar' : '';
 	    
 	    // Regardless of a custom server home, this is still used for various temp files and logs
 	    serverinfo.customServerFolder = getCustomServerFolder( serverInfo );
@@ -605,7 +617,7 @@ component accessors="true" singleton {
 			if( serverInfo.cfengine contains "lucee" ) {
 				// Detect Lucee 4.x
 				if( installDetails.version.listFirst( '.' ) < 5 ) {
-					javaagent = '"-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/lucee-inst.jar"';					
+					javaagent = '-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/lucee-inst.jar';					
 				} else {
 					// Lucee 5+ doesn't need the Java agent
 					javaagent = '';
@@ -613,7 +625,7 @@ component accessors="true" singleton {
 			}
 			// If external Railo server, set the java agent
 			if( serverInfo.cfengine contains "railo" ) {
-				javaagent = '"-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/railo-inst.jar"';
+				javaagent = '-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/railo-inst.jar';
 			}
 	
 			// The process native name
@@ -627,7 +639,7 @@ component accessors="true" singleton {
 				serverInfo.serverHomeDirectory = reReplaceNoCase( serverInfo.WARPath, '(.*)(\.zip|\.war)', '\1' );
 				
 				// Expand the war if it doesn't exist or we're forcing
-				if( !directoryExists( serverInfo.serverHomeDirectory ) || serverProps.force ?: false  ) {
+				if( !directoryExists( serverInfo.serverHomeDirectory ) || ( serverProps.force ?: false ) ) {
 					consoleLogger.info( "Exploding WAR archive...");
 					directoryCreate( serverInfo.serverHomeDirectory, true, true );
 					zip action="unzip" file="#serverInfo.WARPath#" destination="#serverInfo.serverHomeDirectory#" overwrite="true";
@@ -734,7 +746,7 @@ component accessors="true" singleton {
 		var argTokens = parser.tokenizeInput( serverInfo.JVMargs )
 			.map( function( i ){
 				// Clean up a couple escapes the parser does that we don't need
-				return i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' );
+				return parser.unwrapQuotes( i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' ) )	;
 			});
 		// Add in heap size and java agent
 		argTokens
@@ -768,19 +780,19 @@ component accessors="true" singleton {
 	 		 args.append( '--cfengine-name' ).append( CFEngineName );
 	 	}
 	 	if( len( serverInfo.welcomeFiles ) ) {
-	 		 args.append( '--welcome-files' ).append( erverInfo.welcomeFiles );
+	 		 args.append( '--welcome-files' ).append( serverInfo.welcomeFiles );
 	 	}
 	 	if( len( CLIAliases ) ) {
 	 		 args.append( '--dirs' ).append( CLIAliases );
 	 	}
 		  
-		
+			
 		// If background, wrap up JVM args to pass through to background servers
 		// "real" JVM args must come before Runwar args, so creating two variables, once of which will always be empty.
 		if( background ) {
-			var argString = argTokens.toList( ';' ).replace( '"', '\"', 'all' );
+			var argString = argTokens.toList( ';' ); //.replace( '"', '\"', 'all' );
 			if( len( argString ) ) {
-				args.append( '"--jvm-args=#argString#"' );
+				args.append( '--jvm-args=#trim( argString )#' );
 			}
 		// If foreground, just stick them in.
 		} else {
@@ -1204,7 +1216,17 @@ component accessors="true" singleton {
 													 java.InetAddress.getByName( arguments.host ) );
 			serverSocket.close();
 			return true;
-		} catch( any var e ) {
+		} catch( java.net.UnknownHostException var e ) {
+			// In this case, the host name doesn't exist, so we really don't know about the port, but we'll say it's available
+			// otherwise, old, stopped servers who's host entries no longer exist will show up as running.
+			return true;
+		} catch( java.net.BindException var e ) {
+			// Same as above-- the IP address/host isn't bound to any local adapters.  Probably a host file entry went missing.
+			if( e.message contains 'Cannot assign requested address' ) {
+				return true;
+			}
+			// We're assuming that any other error means the address was in use.
+			// Java doesn't provide a specific message or exception type for this unfortunately.
 			return false;
 		}
 	}
@@ -1368,7 +1390,7 @@ component accessors="true" singleton {
 	}
 
 	/**
-	* Get server info for webroot, if not created, it will init a new server info entry
+	* Get server info for webroot
 	* @webroot.hint root directory for served content
  	**/
 	struct function getServerInfo( required webroot , required name){
@@ -1388,8 +1410,6 @@ component accessors="true" singleton {
 			serverInfo.name 	= listLast( arguments.webroot, "\/" );
 			// Store it in server struct
 			servers[ webrootHash ] = serverInfo;
-			// persist it
-			setServers( servers );
 		}
 
 		// Return the new record
@@ -1468,6 +1488,7 @@ component accessors="true" singleton {
 		var newJSON = formatterUtil.formatJSON( serializeJSON( arguments.data ) );
 		// Try to prevent bunping the date modified for no reason
 		if( oldJSON != newJSON ) {
+	    	directoryCreate( getDirectoryFromPath( arguments.configFilePath ), true, true );
 			fileWrite( arguments.configFilePath, newJSON );			
 		}
 	}
