@@ -11,6 +11,8 @@ component accessors="true" singleton {
 
 	// DI Properties
 	property name='shell' 				inject='Shell';
+	property name='wirebox'				inject='wirebox';
+	property name="fileSystemUtil"		inject='FileSystem';
 	property name='parser' 				inject='Parser';
 	property name='system' 				inject='System@constants';
 	property name='cr' 					inject='cr@constants';
@@ -265,11 +267,14 @@ component accessors="true" singleton {
 			// Make sure we have all required params.
 			parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
 
-			// Ensure supplied params match the correct type
-			validateParams( parameterInfo.namedParameters, commandParams );
-
 			// Evaluate parameter expressions
 			evaluateExpressions( parameterInfo );
+
+			// Create globbing patterns
+			createGlobs( parameterInfo, commandParams );
+
+			// Ensure supplied params match the correct type
+			validateParams( parameterInfo.namedParameters, commandParams );
 
 			// Reset the printBuffer
 			commandInfo.commandReference.CFC.reset();
@@ -289,6 +294,10 @@ component accessors="true" singleton {
 
 			interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
 
+			// Successful command execution resets exit code to 0.  Set this prior to running the command since the command
+			// may explicitly set the exit code to 1 but not call the error() method.
+			shell.setExitCode( 0 );
+			
 			// Run the command
 			try {
 				var result = commandInfo.commandReference.CFC.run( argumentCollection = parameterInfo.namedParameters );
@@ -321,9 +330,6 @@ component accessors="true" singleton {
 				}
 			}
 
-			// Successful command execution resets exit code to 0
-			shell.setExitCode( 0 );
-
 			// Remove it from the stack
 			instance.callStack.deleteAt( 1 );
 
@@ -340,7 +346,6 @@ component accessors="true" singleton {
 			result = interceptData.result;
 
 		} // End loop over command chain
-
 		return result;
 
 	}
@@ -833,6 +838,36 @@ component accessors="true" singleton {
 		return userNamedParams;
 	}
 
+	/**
+	 * Check for Globber parameters and create actual Globber object out of them
+ 	 **/
+	private function createGlobs( parameterInfo, commandParams ) {
+		// Loop over user-supplied params
+		for( var paramName in parameterInfo.namedParameters ) {
+			
+			// If this is an expected param
+			functionIndex = commandParams.find( function( i ) {
+				return i.name == paramName;
+			} );
+			
+			if( functionIndex ) {
+				var paramData = commandParams[ functionIndex ];
+				// And it's of type Globber
+				if( ( paramData.type ?: 'any' ) == 'Globber' ) {
+					
+					// Overwrite it with an actual Globber instance seeded with the original canonical path as the pattern.
+					var originalPath = parameterInfo.namedParameters[ paramName ].replace( '\', '/', 'all' );
+					var newPath = fileSystemUtil.resolvePath( originalPath ).replace( '\', '/', 'all' );
+					// Preserve any explicit trailing slashes
+					if( originalPath.endsWith( '/' ) && !newPath.endsWith( '/' ) ) {
+						newPath &= '/';
+					}
+					parameterInfo.namedParameters[ paramName ] = wirebox.getInstance( 'Globber' )
+						.setPattern( newPath );
+				}
+			}
+		}
+	}
 
 	/**
 	 * Make sure all params are the correct type
@@ -843,6 +878,7 @@ component accessors="true" singleton {
 			// If it's required and hasn't been supplied...
 			if( userNamedParams.keyExists( param.name )
 				&& param.keyExists( "type" )
+				&& param.type != 'Globber'
 				&& !isValid( param.type, userNamedParams[ param.name ] ) ){
 
 				throw( message='Parameter [#param.name#] has a value of [#userNamedParams[ param.name ]#] which is not of type [#param.type#].', type="commandException");

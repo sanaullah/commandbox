@@ -85,10 +85,11 @@ component {
 
 		// run it now baby!
 		try{
-			var results = new Http( url=testBoxURL ).send().getPrefix();
-		} catch( any e ){
-			log.error( "Error executing tests: #e.message# #e.detail#", e );
-			return error( 'Error executing tests: #CR# #e.message##CR##e.detail#' );
+			// Throw on error means this command will fail if the actual test runner blows up-- possibly on a compilation issue.
+			Http url=testBoxURL throwonerror=true result='local.results' ;			
+		} catch( any e ){			
+			logger.error( "Error executing tests: #e.message# #e.detail#", e );
+			return error( 'Error executing tests: #CR# #e.message##CR##e.detail##CR##local.results.fileContent ?: ''#' );
 		}
 
 		// Do we have an output file
@@ -109,6 +110,7 @@ component {
 			print.green( " " & results.filecontent );
 		} else if( results.responseheader[ "x-testbox-totalFail" ] gt 0 ){
 			// print Failure report
+			setExitCode( 1 );
 			print.yellow( " " & results.filecontent );
 		} else if( results.responseheader[ "x-testbox-totalError" ] gt 0 ){
 			// print Failure report

@@ -91,7 +91,7 @@ component accessors="true" singleton {
 
 		// Init server config if not found
 		if( !fileExists( variables.serverConfig ) ){
-			setServers( {} );
+			initServers();
 		}
 		// Init custom server location if not exists
 		if( !directoryExists( variables.customServerDirectory ) ){
@@ -119,7 +119,8 @@ component accessors="true" singleton {
 			// Duplicate so onServerStart interceptors don't actually change config settings via refernce.
 			'trayOptions' : duplicate( d.trayOptions ?: [] ),
 			'jvm' : {
-				'heapSize' : d.jvm.heapSize ?: 512,
+				'heapSize' : d.jvm.heapSize ?: 512,				
+				'minHeapSize' : d.jvm.minHeapSize ?: 0,
 				'args' : d.jvm.args ?: ''
 			},
 			'web' : {
@@ -138,8 +139,8 @@ component accessors="true" singleton {
 				'ssl' : {
 					'enable' : d.web.ssl.enable ?: false,
 					'port' : d.web.ssl.port ?: 1443,
-					'cert' : d.web.ssl.cert ?: '',
-					'key' : d.web.ssl.key ?: '',
+					'certFile' : d.web.ssl.certFile ?: '',
+					'keyFile' : d.web.ssl.keyFile ?: '',
 					'keyPass' : d.web.ssl.keyPass ?: ''
 				},
 				'rewrites' : {
@@ -208,6 +209,13 @@ component accessors="true" singleton {
 					return fileSystemUtil.resolvePath( thisLibDir );
 			 	} );
 		}
+		if( !isNull( serverProps.SSLCertFile ) ) {
+			serverProps.SSLCertFile = fileSystemUtil.resolvePath( serverProps.SSLCertFile );
+		}
+		if( !isNull( serverProps.SSLKeyFile ) ) {
+			serverProps.SSLKeyFile = fileSystemUtil.resolvePath( serverProps.SSLKeyFile );
+		}
+
 
 		// Look up the server that we're starting
 		var serverDetails = resolveServerDetails( arguments.serverProps );
@@ -371,10 +379,10 @@ component accessors="true" singleton {
 			    case "SSLPort":
 					serverJSON[ 'web' ][ 'SSL' ][ 'port' ] = serverProps[ prop ];
 			         break;
-			    case "SSLCert":
-					serverJSON[ 'web' ][ 'SSL' ][ 'cert' ] = serverProps[ prop ];
+			    case "SSLCertFile":
+					serverJSON[ 'web' ][ 'SSL' ][ 'certFile' ] = serverProps[ prop ];
 			         break;
-			    case "SSLKey":
+			    case "SSLKeyFile":
 					serverJSON[ 'web' ][ 'SSL' ][ 'key' ] = serverProps[ prop ];
 			         break;
 			    case "SSLKeyPass":
@@ -397,7 +405,10 @@ component accessors="true" singleton {
 			         break;
 			    case "heapSize":
 					serverJSON[ 'JVM' ][ 'heapSize' ] = serverProps[ prop ];
-			         break;
+			         break;			         
+			    case "minHeapSize":
+					serverJSON[ 'JVM' ][ 'minHeapSize' ] = serverProps[ prop ];
+			         break;			         
 			    case "JVMArgs":
 					serverJSON[ 'JVM' ][ 'args' ] = serverProps[ prop ];
 			         break;
@@ -470,14 +481,14 @@ component accessors="true" singleton {
 		if( defaults.keyExists( 'trayIcon' ) && len( defaults.trayIcon ) ) { defaults.trayIcon = fileSystemUtil.resolvePath( defaults.trayIcon, defaultwebroot ); }
 		serverInfo.trayIcon			= serverProps.trayIcon 			?: serverJSON.trayIcon 				?: defaults.trayIcon;
 		
-		serverInfo.SSLEnable 		= serverProps.SSLEnable 		?: serverJSON.web.SSL.enable		?: defaults.web.SSL.enable;
-		serverInfo.HTTPEnable		= serverProps.HTTPEnable 		?: serverJSON.web.HTTP.enable		?: defaults.web.HTTP.enable;
-		serverInfo.SSLPort			= serverProps.SSLPort 			?: serverJSON.web.SSL.port			?: defaults.web.SSL.port;
-		serverInfo.SSLCert 			= serverProps.SSLCert 			?: serverJSON.web.SSL.cert			?: defaults.web.SSL.cert;
-		serverInfo.SSLKey 			= serverProps.SSLKey 			?: serverJSON.web.SSL.key			?: defaults.web.SSL.key;
-		serverInfo.SSLKeyPass 		= serverProps.SSLKeyPass 		?: serverJSON.web.SSL.keyPass		?: defaults.web.SSL.keyPass;
-		serverInfo.rewritesEnable 	= serverProps.rewritesEnable	?: serverJSON.web.rewrites.enable	?: defaults.web.rewrites.enable;
-		serverInfo.welcomeFiles 	= serverProps.welcomeFiles		?: serverJSON.web.welcomeFiles		?: defaults.web.welcomeFiles;
+		serverInfo.SSLEnable 		= serverProps.SSLEnable 		?: serverJSON.web.SSL.enable			?: defaults.web.SSL.enable;
+		serverInfo.HTTPEnable		= serverProps.HTTPEnable 		?: serverJSON.web.HTTP.enable			?: defaults.web.HTTP.enable;
+		serverInfo.SSLPort			= serverProps.SSLPort 			?: serverJSON.web.SSL.port				?: defaults.web.SSL.port;
+		serverInfo.SSLCertFile 		= serverProps.SSLCertFile 		?: serverJSON.web.SSL.certFile			?: defaults.web.SSL.certFile;
+		serverInfo.SSLKeyFile 		= serverProps.SSLKeyFile 		?: serverJSON.web.SSL.keyFile			?: defaults.web.SSL.keyFile;
+		serverInfo.SSLKeyPass 		= serverProps.SSLKeyPass 		?: serverJSON.web.SSL.keyPass			?: defaults.web.SSL.keyPass;
+		serverInfo.rewritesEnable 	= serverProps.rewritesEnable	?: serverJSON.web.rewrites.enable		?: defaults.web.rewrites.enable;
+		serverInfo.welcomeFiles 	= serverProps.welcomeFiles		?: serverJSON.web.welcomeFiles			?: defaults.web.welcomeFiles;
 		// Clean up spaces in welcome file list
 		serverInfo.welcomeFiles = serverInfo.welcomeFiles.listMap( function( i ){ return trim( i ); } );
 		
@@ -489,6 +500,8 @@ component accessors="true" singleton {
 		serverInfo.rewritesConfig 	= serverProps.rewritesConfig 	?: serverJSON.web.rewrites.config 	?: defaults.web.rewrites.config;
 		
 		serverInfo.heapSize 		= serverProps.heapSize 			?: serverJSON.JVM.heapSize			?: defaults.JVM.heapSize;
+		serverInfo.minHeapSize 		= serverProps.minHeapSize		?: serverJSON.JVM.minHeapSize		?: defaults.JVM.minHeapSize;
+				
 		serverInfo.directoryBrowsing = serverProps.directoryBrowsing ?: serverJSON.web.directoryBrowsing ?: defaults.web.directoryBrowsing;
 		
 		// Global aliases are always added on top of server.json (but don't overwrite)
@@ -749,9 +762,15 @@ component accessors="true" singleton {
 				return parser.unwrapQuotes( i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' ) )	;
 			});
 		// Add in heap size and java agent
-		argTokens
-			.append( '-Xmx#serverInfo.heapSize#m' )
-			.append( '-Xms#serverInfo.heapSize#m' );
+		argTokens.append( '-Xmx#serverInfo.heapSize#m' );
+		
+		if( val( serverInfo.minHeapSize ) ) {
+			if( serverInfo.minHeapSize > serverInfo.heapSize ) {
+				consoleLogger.warn( 'Your JVM min heap size [#serverInfo.minHeapSize#] is set larger than your max size [#serverInfo.heapSize#]! Reducing the Min to prevent errors.' );
+			}
+			argTokens.append( '-Xms#min( serverInfo.minHeapSize, serverInfo.heapSize )#m' );
+		}
+			
 		if( len( trim( javaAgent ) ) ) { argTokens.append( javaagent ); }
 		
 		 args
@@ -829,11 +848,14 @@ component accessors="true" singleton {
 				.append( '--ssl-enable' ).append( serverInfo.SSLEnable )
 				.append( '--ssl-port' ).append( serverInfo.SSLPort );
 		}
-		if( serverInfo.SSLEnable && serverInfo.SSLCert != "" ) {
+		if( serverInfo.SSLEnable && serverInfo.SSLCertFile.len() ) {
 			args
-				.append( '--ssl-cert' ).append( serverInfo.SSLCert )
-				.append( '--ssl-key' ).append( serverInfo.SSLKey )
-				.append( '--ssl-keypass' ).append( serverInfo.SSLKeyPass );
+				.append( '--ssl-cert' ).append( serverInfo.SSLCertFile )
+				.append( '--ssl-key' ).append( serverInfo.SSLKeyFile );
+			// Not all certs require a password
+			if( serverInfo.SSLKeyPass.len() ) {
+				args.append( '--ssl-keypass' ).append( serverInfo.SSLKeyPass );	
+			}
 		}
 		
 		// Incorporate rewrites to command
@@ -1261,6 +1283,15 @@ component accessors="true" singleton {
 	}
 
 	/**
+	 * Create initial server JSON
+ 	 **/
+	function initServers(){
+		lock name="serverservice.serverconfig" type="exclusive" throwOnTimeout="true" timeout="10"{
+			fileWrite( serverConfig, '{}' );
+		}
+	}
+
+	/**
 	 * persist servers
 	 * @servers.hint struct of serverInfos
  	 **/
@@ -1445,12 +1476,13 @@ component accessors="true" singleton {
 			'HTTPEnable'		: true,
 			'SSLEnable'			: false,
 			'SSLPort'			: 1443,
-			'SSLCert' 			: "",
-			'SSLKey'			: "",
+			'SSLCertFile'		: "",
+			'SSLKeyFile'		: "",
 			'SSLKeyPass'		: "",
-			'rewritesEnable'	  : false,
+			'rewritesEnable'	: false,
 			'rewritesConfig'	: "",
-			'heapSize'			: 512,
+			'heapSize'			: 512,			
+			'minHeapSize'		: 0,
 			'directoryBrowsing' : true,
 			'JVMargs'			: "",
 			'runwarArgs'		: "",
