@@ -6,7 +6,7 @@
 * The default generator used is 'native'
 * .
 * To generate properties you will pass a list of property names to the 'properties' argument.  You can also add
-* ORM types to the properties by separating them with a semicolon.  For example:
+* ORM types to the properties by separating them with a colon.  For example:
 * {code:bash}
 * properties=name,createDate:timestamp,age:numeric
 * {code}
@@ -16,13 +16,13 @@
 * {code:bash}
 * // Basic
 * coldbox create orm-entity User --open
-* 
+*
 * // Active Entity
 * coldbox create orm-entity User --open --activeEntity
-* 
+*
 * // With Some Specifics
 * coldbox create orm-entity entityName=User table=users primaryKey=userID generator=uuid
-* 
+*
 * // With some properties
 * coldbox create orm-entity entityName=User properties=firstname,lastname,email,createDate:timestamp,updatedate:timestamp,age:numeric
 * {code}
@@ -39,13 +39,13 @@ component {
 	* @primaryKeyColumn Enter the name of the primary key column. Leave empty if same as the primaryKey value
 	* @generator Enter the ORM key generator to use, defaults to 'native'
 	* @generator.options increment,identity,sequence,native,assigned,foreign,seqhilo,uuid,guid,select,sequence-identiy
-	* @properties Enter a list of properties to generate. You can add the ORM type via semicolon separator, default type is string. Ex: firstName,age:numeric,createdate:timestamp
+	* @properties Enter a list of properties to generate. You can add the ORM type via colon separator, default type is string. Ex: firstName,age:numeric,createdate:timestamp
 	* @tests Generate the unit test BDD component
 	* @testsDirectory Your unit tests directory. Only used if tests is true
 	* @script Generate as script or not, defaults to true
 	* @open Open the file(s) once generated
 	**/
-	function run( 
+	function run(
 		required entityName,
 		table="",
 		directory="models",
@@ -139,12 +139,12 @@ component {
 			// Create the tests
 			file action='write' file='#testPath#' mode ='777' output='#modelTestContent#';
 			// open file
-			if( arguments.open ){ openPath( testPath ); }			
+			if( arguments.open ){ openPath( testPath ); }
 			print.greenLine( 'Created #testPath#' );
 		}
 
 		// Open file?
-		if( arguments.open ){ openPath( modelPath ); }			
+		if( arguments.open ){ openPath( modelPath ); }
 	}
 
 }

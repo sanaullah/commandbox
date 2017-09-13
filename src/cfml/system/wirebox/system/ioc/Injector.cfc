@@ -1,4 +1,4 @@
-﻿<!-----------------------------------------------------------------------
+<!-----------------------------------------------------------------------
 ********************************************************************************
 Copyright Since 2005 ColdBox Framework by Luis Majano and Ortus Solutions, Corp
 www.ortussolutions.com
@@ -246,7 +246,15 @@ Description :
 			// Check if the mapping has been discovered yet, and if it hasn't it must be autowired enabled in order to process.
 			if( NOT mapping.isDiscovered() ){
 				// process inspection of instance
-				mapping.process(binder=instance.binder,injector=this);
+				try {
+					mapping.process(binder=instance.binder,injector=this);
+				} catch( any e ) {
+					// Remove bad mapping
+					var mappings = instance.binder.getMappings();
+					mappings.delete( name );
+					// rethrow
+					throw( object=e );
+				}
 			}
 
 			// scope persistence check
@@ -318,7 +326,7 @@ Description :
 				}
 				default: { throw(message="Invalid Construction Type: #thisMap.getType()#",type="Injector.InvalidConstructionType"); }
 			}
-			
+
 			// Check and see if this mapping as an influence closure
 			var influenceClosure = thisMap.getInfluenceClosure();
 			if( !isSimpleValue( influenceClosure ) ) {
@@ -327,9 +335,9 @@ Description :
 				// Allow the closure to override the entire instance if it wishes
 				if( structKeyExists( local, 'result' ) ) {
 					oModel = local.result;
-				}	
+				}
 			}
-			
+
 			// log data
 			if( instance.log.canDebug() ){
 				instance.log.debug("Instance object built: #arguments.mapping.getName()#:#arguments.mapping.getPath().toString()#");

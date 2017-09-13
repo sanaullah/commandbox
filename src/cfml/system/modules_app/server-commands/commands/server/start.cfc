@@ -82,7 +82,9 @@ component aliases="start" {
 	 * @console				Start this server in the forground console process and wait until Ctrl-C is pressed to stop it.
 	 * @welcomeFiles		A comma-delimited list of default files to load when visiting a directory (index.cfm,index.htm,etc)
 	 * @serverHomeDirectory	The folder where the CF engine WAR should be extracted
-	 
+	 * @restMappings		A comma-delimited list of REST mappings in the form of /api/*,/rest/*.  Empty string to disable.
+	 * @trace				Enable trace level logging
+	 * @javaHomeDirectory	Path to the JRE home directory containing ./bin/java
 	 **/
 	function run(
 		String  name,
@@ -118,7 +120,10 @@ component aliases="start" {
 		Numeric startTimeout,
 		Boolean console,
 		String welcomeFiles,
-		String serverHomeDirectory
+		String serverHomeDirectory,
+		String restMappings,
+		Boolean trace,
+		String javaHomeDirectory
 	){
 
 		// This is a common mis spelling
@@ -128,40 +133,42 @@ component aliases="start" {
 			arguments.rewritesEnable = arguments.rewritesEnabled;
 			structDelete( arguments, 'rewritesEnabled' );
 		}
-		
+
 		// changed trayIcon to trayIconFile, but let's keep them both working for backwards compat
 		if( structKeyExists( arguments, 'trayIconFile' ) ) {
 			arguments.trayIcon = arguments.trayIconFile;
 			structDelete( arguments, 'trayIconFile' );
 		}
-		
+
 		try {
-			
+
 			// startup the server
 			return serverService.start( serverProps = arguments );
-				
-		// endpointException exception type is used when the endpoint has an issue that needs displayed, 
-		// but I don't want to "blow up" the console with a full error.	
+
+		// endpointException exception type is used when the endpoint has an issue that needs displayed,
+		// but I don't want to "blow up" the console with a full error.
 		} catch( endpointException var e ) {
 			error( e.message, e.detail );
 		}
 	}
-	
+
 	/**
 	* Complete server names
 	*/
 	function serverNameComplete() {
 		return serverService.getServerNames();
 	}
-	
+
 	/**
 	* Complete cfengine names
 	*/
 	function cfengineNameComplete( string paramSoFar ) {
-		
+
+		var APIToken = configService.getSetting( 'endpoints.forgebox.APIToken', '' );
+
 		try {
 			// Get auto-complete options
-			return forgebox.slugSearch( arguments.paramSoFar, 'cf-engines' );
+			return forgebox.slugSearch( arguments.paramSoFar, 'cf-engines', APIToken );
 		} catch( forgebox var e ) {
 			// Gracefully handle ForgeBox issues
 			print
