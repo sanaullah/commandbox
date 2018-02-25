@@ -75,7 +75,7 @@ component aliases="start" {
 	 * @runwarArgs 			Additional Runwar options to use when starting the server. Use "server status --verbose" to debug
 	 * @saveSettings 		Save start settings in server.json
 	 * @cfengine        	sets the cfml engine type
-	 * @cfengine.optionsUDF  cfengineNameComplete
+	 * @cfengine.optionsUDF cfengineNameComplete
 	 * @WARPath				sets the path to an existing war to use
 	 * @serverConfigFile 	The path to the server's JSON file.  Created if it doesn't exist.
 	 * @startTimeout 		The amount of time in seconds to wait for the server to start (in the background).
@@ -85,6 +85,8 @@ component aliases="start" {
 	 * @restMappings		A comma-delimited list of REST mappings in the form of /api/*,/rest/*.  Empty string to disable.
 	 * @trace				Enable trace level logging
 	 * @javaHomeDirectory	Path to the JRE home directory containing ./bin/java
+	 * @AJPEnable			Enable AJP
+	 * @AJPPort				AJP Port number
 	 **/
 	function run(
 		String  name,
@@ -123,7 +125,9 @@ component aliases="start" {
 		String serverHomeDirectory,
 		String restMappings,
 		Boolean trace,
-		String javaHomeDirectory
+		String javaHomeDirectory,
+		Boolean AJPEnable,
+		Numeric AJPPort
 	){
 
 		// This is a common mis spelling
@@ -148,6 +152,8 @@ component aliases="start" {
 		// endpointException exception type is used when the endpoint has an issue that needs displayed,
 		// but I don't want to "blow up" the console with a full error.
 		} catch( endpointException var e ) {
+			error( e.message, e.detail );
+		} catch( serverException var e ) {
 			error( e.message, e.detail );
 		}
 	}

@@ -57,13 +57,13 @@ component singleton {
     	text = ansifyHTML( text, "strong", "bold", additionalFormatting );
     	text = ansifyHTML( text, "em", "underline", additionalFormatting );
 
-  	 	// Replace br tags (and any whitespace/line breaks after them) with a CR
-  	 	text = reReplaceNoCase( text , "<br[^>]*>\s*", CR, 'all' );
+  	 	// Replace br tags (and any whitespace/line breaks after them) with a LF
+  	 	text = reReplaceNoCase( text , "<br[^>]*>\s*", LF, 'all' );
 
     	var t='div';
     	var matches = REMatch('(?i)<#t#[^>]*>(.*?)</#t#>', text);
     	for(var match in matches) {
-    		var blockText = reReplaceNoCase(match,"<#t#[^>]*>(.*?)</#t#>","\1") & CR;
+    		var blockText = reReplaceNoCase(match,"<#t#[^>]*>(.*?)</#t#>","\1") & LF;
     		text = replace(text,match,blockText,"one");
     	}
 
@@ -217,8 +217,8 @@ component singleton {
 	 * Pretty JSON
 	 * @json.hint A string containing JSON, or a complex value that can be serialized to JSON
  	 **/
-	public function formatJson( json ) {
+	public function formatJson( json, indent, lineEnding ) {
 		// This is an external lib now.  Leaving here for backwards compat.
-		return JSONPrettyPrint.formatJSON( json );
+		return JSONPrettyPrint.formatJSON( argumentCollection=arguments );
 	}
 }

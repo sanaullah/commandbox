@@ -16,7 +16,6 @@ this.dependencies 		= "The array of dependencies for this module"
 structures to create for configuration
 - parentSettings : struct (will append and override parent)
 - settings : struct
-- datasources : struct (will append and override parent)
 - interceptorSettings : struct of the following keys ATM
 	- customInterceptionPoints : string list of custom interception points
 - interceptors : array
@@ -55,6 +54,8 @@ component {
 	this.layoutParentLookup = true;
 	// Module Entry Point
 	this.entryPoint			= "@title@";
+	// Inherit Entry Point
+	this.inheritEntryPoint 	= false;
 	// Model Namespace
 	this.modelNamespace		= "@modelNamespace@";
 	// CF Mapping
@@ -81,17 +82,17 @@ component {
 			defaultLayout = ""
 		};
 
-		// datasources
-		datasources = {
-
-		};
-
 		// SES Routes
 		routes = [
 			// Module Entry Point
 			{ pattern="/", handler="home", action="index" },
 			// Convention Route
 			{ pattern="/:handler/:action?" }
+		];
+
+		// SES Resources
+		resources = [
+			// { resource = "" }
 		];
 
 		// Custom Declared Points

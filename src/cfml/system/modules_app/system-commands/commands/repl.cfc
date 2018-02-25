@@ -20,9 +20,9 @@
 component {
 
 	// repl history file
-	property name="commandHistoryFile"		inject="commandHistoryFile@java";
-	property name="REPLScriptHistoryFile"	inject="REPLScriptHistoryFile@java";
-	property name="REPLTagHistoryFile"	inject="REPLTagHistoryFile@java";
+	property name="commandHistoryFile"		inject="commandHistoryFile@constants";
+	property name="REPLScriptHistoryFile"	inject="REPLScriptHistoryFile@constants";
+	property name="REPLTagHistoryFile"	inject="REPLTagHistoryFile@constants";
 
 	// repl parser
 	property name="REPLParser"		inject="REPLParser";
@@ -42,7 +42,9 @@ component {
   	   arguments.directory = fileSystemUtil.resolvePath( arguments.directory );
 
 		// Setup REPL history file
-		shell.getReader().setHistory( newHistory );
+		shell.setHistory( newHistory );
+		shell.setHighlighter( 'REPL' );
+		shell.setCompletor( 'REPL', executor );
 
 		if( !structKeyExists( arguments, 'input' ) ) {
 			print.cyanLine( "Enter any valid CFML code in the following prompt in order to evaluate it and print out any results (if any)" );
@@ -67,9 +69,9 @@ component {
 				do {
 					// ask repl
 					if ( arrayLen( REPLParser.getCommandLines() ) == 0 ) {
-						var command = ask( ( arguments.script ? 'CFSCRIPT' : 'CFML' ) &  '-REPL: ' );
+						var command = ask( message=( arguments.script ? 'CFSCRIPT' : 'CFML' ) &  '-REPL: ', keepHistory=true, highlight=true, complete=true );
 					} else {
-						var command = ask( "..." );
+						var command = ask( message=".............: ", keepHistory=true, highlight=true, complete=true );
 
 						// allow ability to break out of adding additional lines
 						if ( trim(command) == 'exit' || trim(command) == '' ) {
@@ -106,11 +108,9 @@ component {
 					}
 
 					// print results
-					if( !isNull( results ) ){
-						// Make sure results is a string
-						results = REPLParser.serializeOutput( results );
-						print.line( results, structKeyExists( arguments, 'input' ) ? '' : 'boldRed' )
-					}
+					// Make sure results is a string
+					results = REPLParser.serializeOutput( argumentCollection={ result : ( isNull( results ) ? nullValue() : results ) } );
+					print.line( results, structKeyExists( arguments, 'input' ) ? '' : 'boldRed' )
 
 				} catch( any e ){
 					// flush out anything in buffer
@@ -119,9 +119,11 @@ component {
 					logger.error( '#e.message# #e.detail#' , e.stackTrace );
 					if( quit ) {
 						// flush history out
-						newHistory.flush();
+						shell.getReader().getHistory().save();
 						// set back original history
-						shell.getReader().setHistory( commandHistoryFile );
+						shell.setHistory( commandHistoryFile );
+						shell.setHighlighter( 'command' );
+						shell.setCompletor( 'command' );
 						// This will exist the command
 						error( '#e.message##CR##e.detail#' );
 					} else {
@@ -134,9 +136,11 @@ component {
 			}
 		}
 		// flush history out
-		newHistory.flush();
+		shell.getReader().getHistory().save();
 		// set back original history
-		shell.getReader().setHistory( commandHistoryFile );
+		shell.setHistory( commandHistoryFile );
+		shell.setHighlighter( 'command' );
+		shell.setCompletor( 'command' );
 	}
 
 

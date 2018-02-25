@@ -138,16 +138,20 @@ component accessors="true" singleton {
 				// Duplicate so onServerStart interceptors don't actually change config settings via refernce.
 				'errorPages' : duplicate( d.web.errorPages ?: {} ),
 				'welcomeFiles' : d.web.welcomeFiles ?: '',
-				'http' : {
+				'HTTP' : {
 					'port' : d.web.http.port ?: 0,
 					'enable' : d.web.http.enable ?: true
 				},
-				'ssl' : {
+				'SSL' : {
 					'enable' : d.web.ssl.enable ?: false,
 					'port' : d.web.ssl.port ?: 1443,
 					'certFile' : d.web.ssl.certFile ?: '',
 					'keyFile' : d.web.ssl.keyFile ?: '',
 					'keyPass' : d.web.ssl.keyPass ?: ''
+				},
+				'AJP' : {
+					'enable' : d.web.ajp.enable ?: false,
+					'port' : d.web.ajp.port ?: 8009
 				},
 				'rewrites' : {
 					'enable' : d.web.rewrites.enable ?: false,
@@ -398,6 +402,12 @@ component accessors="true" singleton {
 			    case "SSLPort":
 					serverJSON[ 'web' ][ 'SSL' ][ 'port' ] = serverProps[ prop ];
 			         break;
+			    case "AJPEnable":
+					serverJSON[ 'web' ][ 'AJP' ][ 'enable' ] = serverProps[ prop ];
+			         break;
+			    case "AJPPort":
+					serverJSON[ 'web' ][ 'AJP' ][ 'port' ] = serverProps[ prop ];
+			         break;
 			    case "SSLCertFile":
 					serverJSON[ 'web' ][ 'SSL' ][ 'certFile' ] = serverProps[ prop ];
 			         break;
@@ -485,17 +495,6 @@ component accessors="true" singleton {
 			serverInfo.port = getRandomPort( serverInfo.host );
 		}
 
-		// If there's no open URL, let's create a complete one
-		if( !serverInfo.openbrowserURL.len() ) {
-			serverInfo.openbrowserURL = serverInfo.SSLEnable ? 'https://#serverInfo.host#:#serverInfo.SSLPort#' : 'http://#serverInfo.host#:#serverInfo.port#';
-		// Partial URL like /admin/login.cm
-		} else if ( left( serverInfo.openbrowserURL, 4 ) != 'http' ) {
-			if( !serverInfo.openbrowserURL.startsWith( '/' ) ) {
-				serverInfo.openbrowserURL = '/' & serverInfo.openbrowserURL;
-			}
-			serverInfo.openbrowserURL = ( serverInfo.SSLEnable ? 'https://#serverInfo.host#:#serverInfo.SSLPort#' : 'http://#serverInfo.host#:#serverInfo.port#' ) & serverInfo.openbrowserURL;
-		}
-
 		serverInfo.stopsocket		= serverProps.stopsocket		?: serverJSON.stopsocket 			?: getRandomPort( serverInfo.host );
 
 		// relative trayIcon in server.json is resolved relative to the server.json
@@ -526,6 +525,9 @@ component accessors="true" singleton {
 		serverInfo.HTTPEnable		= serverProps.HTTPEnable 		?: serverJSON.web.HTTP.enable			?: defaults.web.HTTP.enable;
 		serverInfo.SSLPort			= serverProps.SSLPort 			?: serverJSON.web.SSL.port				?: defaults.web.SSL.port;
 		
+		serverInfo.AJPEnable 		= serverProps.AJPEnable 		?: serverJSON.web.AJP.enable			?: defaults.web.AJP.enable;
+		serverInfo.AJPPort			= serverProps.AJPPort 			?: serverJSON.web.AJP.port				?: defaults.web.AJP.port;
+		
 		// relative certFile in server.json is resolved relative to the server.json
 		if( isDefined( 'serverJSON.web.SSL.certFile' ) ) { serverJSON.web.SSL.certFile = fileSystemUtil.resolvePath( serverJSON.web.SSL.certFile, defaultServerConfigFileDirectory ); }
 		// relative certFile in config setting server defaults is resolved relative to the web root
@@ -548,6 +550,16 @@ component accessors="true" singleton {
 
 		serverInfo.trayEnable	 	= serverJSON.trayEnable			?: defaults.trayEnable;
 
+		// If there's no open URL, let's create a complete one
+		if( !serverInfo.openbrowserURL.len() ) {
+			serverInfo.openbrowserURL = serverInfo.SSLEnable ? 'https://#serverInfo.host#:#serverInfo.SSLPort#' : 'http://#serverInfo.host#:#serverInfo.port#';
+		// Partial URL like /admin/login.cm
+		} else if ( left( serverInfo.openbrowserURL, 4 ) != 'http' ) {
+			if( !serverInfo.openbrowserURL.startsWith( '/' ) ) {
+				serverInfo.openbrowserURL = '/' & serverInfo.openbrowserURL;
+			}
+			serverInfo.openbrowserURL = ( serverInfo.SSLEnable ? 'https://#serverInfo.host#:#serverInfo.SSLPort#' : 'http://#serverInfo.host#:#serverInfo.port#' ) & serverInfo.openbrowserURL;
+		}
 
 		// Clean up spaces in welcome file list
 		serverInfo.welcomeFiles = serverInfo.welcomeFiles.listMap( function( i ){ return trim( i ); } );
@@ -655,7 +667,7 @@ component accessors="true" singleton {
 		// These are already hammered out above, so no need to go through all the defaults.
 		serverInfo.serverConfigFile	= defaultServerConfigFile;
 		serverInfo.name 			= defaultName;
-		serverInfo.webroot 			= defaultwebroot;
+		serverInfo.webroot 			= normalizeWebroot( defaultwebroot );
 
 		if( serverInfo.debug ) {
 			consoleLogger.info( "start server in - " & serverInfo.webroot );
@@ -674,8 +686,8 @@ component accessors="true" singleton {
 
 		var launchUtil 	= java.LaunchUtil;
 
-	    // Default java agent for embedded Lucee engine
-	    var javaagent = serverinfo.cfengine contains 'lucee' ? '-javaagent:#libdir#/lucee-inst.jar' : '';
+	    // Default java agent
+	    var javaagent = '';
 
 	    // Regardless of a custom server home, this is still used for various temp files and logs
 	    serverinfo.customServerFolder = getCustomServerFolder( serverInfo );
@@ -711,7 +723,7 @@ component accessors="true" singleton {
 			// If Lucee server, set the java agent
 			if( serverInfo.cfengine contains "lucee" ) {
 				// Detect Lucee 4.x
-				if( installDetails.version.listFirst( '.' ) < 5 ) {
+				if( installDetails.version.listFirst( '.' ) < 5 && fileExists( '#serverInfo.serverHomeDirectory#/WEB-INF/lib/lucee-inst.jar' ) ) {
 					javaagent = '-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/lucee-inst.jar';
 				} else {
 					// Lucee 5+ doesn't need the Java agent
@@ -721,6 +733,12 @@ component accessors="true" singleton {
 			// If external Railo server, set the java agent
 			if( serverInfo.cfengine contains "railo" ) {
 				javaagent = '-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/railo-inst.jar';
+			}
+			
+			// If starting Adobe server with SSL
+			if( serverInfo.cfengine contains "adobe" && serverInfo.SSLEnable ) {
+				// https://ortussolutions.atlassian.net/browse/COMMANDBOX-725
+				serverInfo.JVMargs &= ' -Dcom.sun.net.ssl.enableECC=false';
 			}
 
 			// Add in "/cf_scripts" alias for 2016+ servers if the /cf_scripts folder exists in the war we're starting and there isn't already an alias
@@ -820,7 +838,8 @@ component accessors="true" singleton {
 
 		// Make current settings available to package scripts
 		setServerInfo( serverInfo );
-		interceptorService.announceInterception( 'onServerStart', { serverInfo=serverInfo } );
+		// installDetails doesn't exist for a war server
+		interceptorService.announceInterception( 'onServerStart', { serverInfo=serverInfo, serverJSON=serverJSON, defaults=defaults, serverProps=serverProps, serverDetails=serverDetails, installDetails=installDetails ?: {} } );
 
 		// Turn struct of aliases into a comma-delimited list, plus resolve relative paths.
 		// "/foo=C:\path,/bar=C:\another/path"
@@ -862,7 +881,7 @@ component accessors="true" singleton {
 		var argTokens = parser.tokenizeInput( serverInfo.JVMargs )
 			.map( function( i ){
 				// Clean up a couple escapes the parser does that we don't need
-				return parser.unwrapQuotes( i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' ) )	;
+				return parser.unwrapQuotes( i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' ).replace( ';', '\;', 'all' ) );
 			});
 		// Add in heap size and java agent
 		argTokens.append( '-Xmx#serverInfo.heapSize#m' );
@@ -879,13 +898,10 @@ component accessors="true" singleton {
 		 args
 		 	.append( '-jar' ).append( variables.jarPath )
 		 	.append( '--background=#background#' )
-		 	.append( '--port' ).append( serverInfo.port )
 		 	.append( '--host' ).append( serverInfo.host )
 		 	.append( '--stop-port' ).append( serverInfo.stopsocket )
 		 	.append( '--processname' ).append( processName )
 		 	.append( '--log-dir' ).append( serverInfo.logDir )
-		 	.append( '--open-browser' ).append( serverInfo.openbrowser )
-		 	.append( '--open-url' ).append( serverInfo.openbrowserURL )
 		 	.append( '--server-name' ).append( serverInfo.name )
 		 	.append( '--tray-icon' ).append( serverInfo.trayIcon )
 		 	.append( '--tray-config' ).append( trayOptionsPath )
@@ -895,10 +911,10 @@ component accessors="true" singleton {
 		 	.append( '--proxy-peeraddress' ).append( 'true' )
 		 	.append( serverInfo.runwarArgs.listToArray( ' ' ), true );
 
-		 	if( serverInfo.debug ) {
-		 		// Debug is getting turned on any time I include the --debug flag regardless of whether it's true or false.
-		 		args.append( '--debug' ).append( serverInfo.debug );
-		 	}
+		if( serverInfo.debug ) {
+			// Debug is getting turned on any time I include the --debug flag regardless of whether it's true or false.
+			args.append( '--debug' ).append( serverInfo.debug );
+		}
 
 		// Runwar will blow up if there isn't a parameter supplied, so I can't pass an empty string.
 		if( len( serverInfo.restMappings ) ) {
@@ -960,13 +976,38 @@ component accessors="true" singleton {
 			args.append( '--lib-dirs' ).append( serverInfo.libDirs.listChangeDelims( ',', ',' ) );
 		}
 
-		// Incorporate SSL to command
-		if( serverInfo.SSLEnable ){
+		// Always send the enable flag for each protocol
+		args
+			.append( '--http-enable' ).append( serverInfo.HTTPEnable )
+			.append( '--ssl-enable' ).append( serverInfo.SSLEnable )
+			.append( '--ajp-enable' ).append( serverInfo.AJPEnable );
+				
+				
+		if( serverInfo.HTTPEnable || serverInfo.SSLEnable ) {
 			args
-				.append( '--http-enable' ).append( serverInfo.HTTPEnable )
-				.append( '--ssl-enable' ).append( serverInfo.SSLEnable )
-				.append( '--ssl-port' ).append( serverInfo.SSLPort );
+			 	.append( '--open-browser' ).append( serverInfo.openbrowser )
+			 	.append( '--open-url' ).append( serverInfo.openbrowserURL );	
+		} else {
+			args.append( '--open-browser' ).append( false );			
 		}
+		 	
+		 	
+		// Send HTTP port if it's enabled
+		if( serverInfo.HTTPEnable ){
+			args.append( '--port' ).append( serverInfo.port )
+		}
+
+		// Send SSL port if it's enabled
+		if( serverInfo.SSLEnable ){
+			args.append( '--ssl-port' ).append( serverInfo.SSLPort );
+		}
+
+		// Send AJP port if it's enabled
+		if( serverInfo.AJPEnable ){
+			args.append( '--ajp-port' ).append( serverInfo.AJPPort );
+		}
+		
+		// Send SSL cert info if SSL is enabled and there's cert info
 		if( serverInfo.SSLEnable && serverInfo.SSLCertFile.len() ) {
 			args
 				.append( '--ssl-cert' ).append( serverInfo.SSLCertFile )
@@ -1031,13 +1072,17 @@ component accessors="true" singleton {
 	    variables.process = processBuilder.start();
 
 		// She'll be coming 'round the mountain when she comes...
-		consoleLogger.warn( "The server for #serverInfo.webroot# is starting on #serverInfo.host#:#serverInfo.port#..." );
+		consoleLogger.warn( "The server for #serverInfo.webroot# is starting on #serverInfo.openbrowserURL# ..." );
 
 		// If the user is running a one-off command to start a server or specified the debug flag, stream the output and wait until it's finished starting.
 		var interactiveStart = ( shell.getShellType() == 'command' || serverInfo.debug || !background );
 
+		// A reference to the current thread so the thread we're about to spin up can access it.
+		// This may be available as parent thread or something.
+		var thisThread = createObject( 'java', 'java.lang.Thread' ).currentThread();
+		variables.waitingOnConsoleStart = false; 
 		// Spin up a thread to capture the standard out and error from the server
-		thread name="#threadName#" interactiveStart=interactiveStart serverInfo=serverInfo args=args startTimeout=serverInfo.startTimeout  {
+		thread name="#threadName#" interactiveStart=interactiveStart serverInfo=serverInfo args=args startTimeout=serverInfo.startTimeout parentThread=thisThread {
 			try{
 
 				// save server info and persist
@@ -1055,8 +1100,11 @@ component accessors="true" singleton {
 				while( !isNull( line ) ){
 					// Clean log4j cruft from line
 					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - processoutput: ', '' );
+					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger processoutput: ', '' );
 					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger lib: ', 'Runwar: ' );
 					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - ', 'Runwar: ' );
+					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - ', 'Runwar: ' );
+					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger ', 'Runwar: ' );
 
 					// Build up our output
 					startOutput.append( line & chr( 13 ) & chr( 10 ) );
@@ -1089,6 +1137,15 @@ component accessors="true" singleton {
 				}
 				serverInfo.statusInfo.result = startOutput.toString();
 				setServerInfo( serverInfo );
+				// If the "start" command is on the line watching our console output
+				if( variables.waitingOnConsoleStart ) {
+					print
+						.line()
+						.line( "Server's output stream closed. It's been stopped elsewhere." )
+						.toConsole();
+					// This will end the readline() call below so the "start" command can finally exit
+					parentThread.interrupt();
+				}
 			}
 		}
 
@@ -1098,10 +1155,8 @@ component accessors="true" singleton {
 			if( !background ) {
 				try {
 
+					variables.waitingOnConsoleStart = true;
 					while( true ) {
-						// Wipe out prompt so it doesn't redraw if the user hits enter
-						shell.getReader().setPrompt( '' );
-
 						// Detect user pressing Ctrl-C
 						// Any other characters captured will be ignored
 						var line = shell.getReader().readLine();
@@ -1112,15 +1167,20 @@ component accessors="true" singleton {
 						}
 					}
 
-				// user wants to exit, they've pressed Ctrl-C
-				} catch ( jline.console.UserInterruptException e ) {
+				// user wants to exit this command, they've pressed Ctrl-C
+				} catch ( org.jline.reader.UserInterruptException e ) {
+					consoleLogger.error( 'Stopping server...' );
+				// user wants to exit the shell, they've pressed Ctrl-D
+				} catch ( org.jline.reader.EndOfFileException e ) {
+					consoleLogger.error( 'Stopping server...' );
+					shell.setKeepRunning( false );
 				// Something bad happened
 				} catch ( Any e ) {
 					logger.error( '#e.message# #e.detail#' , e.stackTrace );
 					consoleLogger.error( '#e.message##chr(10)##e.detail#' );
 				// Either way, this server is done like dinner
 				} finally {
-					consoleLogger.error( 'Stopping server...' );
+					variables.waitingOnConsoleStart = false;
 					shell.setPrompt();
 					process.destroy();
 				}
@@ -1366,11 +1426,19 @@ component accessors="true" singleton {
 	 * @host.hint host to get port on, defaults 127.0.0.1
  	 **/
 	function getRandomPort( host="127.0.0.1" ){
-		var nextAvail  = java.ServerSocket.init( javaCast( "int", 0 ),
-												 javaCast( "int", 1 ),
-												 java.InetAddress.getByName( arguments.host ) );
-		var portNumber = nextAvail.getLocalPort();
-		nextAvail.close();
+		try {
+			var nextAvail  = java.ServerSocket.init( javaCast( "int", 0 ),
+													 javaCast( "int", 1 ),
+													 java.InetAddress.getByName( arguments.host ) );
+			var portNumber = nextAvail.getLocalPort();
+			nextAvail.close();
+		} catch( java.net.UnknownHostException var e ) {
+			throw( "The host name [#arguments.host#] can't be found. Do you need to add a host file entry?", 'serverException', e.message & ' ' & e.detail );
+		} catch( java.net.BindException var e ) {
+			// Same as above-- the IP address/host isn't bound to any local adapters.  Probably a host file entry went missing.
+			throw( "The IP address that [#arguments.host#] resovles to can't be bound.  If you ping it, does it point to a local network adapter?", 'serverException', e.message & ' ' & e.detail );
+		}
+			
 		return portNumber;
 	}
 
@@ -1671,6 +1739,8 @@ component accessors="true" singleton {
 			'HTTPEnable'		: true,
 			'SSLEnable'			: false,
 			'SSLPort'			: 1443,
+			'AJPEnable'			: false,
+			'AJPPort'			: 8009,
 			'SSLCertFile'		: "",
 			'SSLKeyFile'		: "",
 			'SSLKeyPass'		: "",
@@ -1714,8 +1784,7 @@ component accessors="true" singleton {
 			if( isJSON( fileContents ) ) {
 				return deserializeJSON( fileContents );
 			} else {
-				consoleLogger.warn( 'Warning: File is not valid JSON. [#path#]' );
-				return {};
+				throw( message='File is not valid JSON. [#path#].  Operation aborted.', type="commandException");
 			}
 		} else {
 			return {};

@@ -27,9 +27,9 @@ component accessors=true singleton {
 
 		setInterceptionPoints( [
 			// CLI lifecycle
-			'onCLIStart','onCLIExit',
+			'onCLIStart','onCLIExit','prePrompt',
 			// Command execution lifecycle
-			'preCommand','postCommand',
+			'preCommand','postCommand','preProcessLine', 'postProcessLine',
 			// Module lifecycle
 			'preModuleLoad','postModuleLoad','preModuleUnLoad','postModuleUnload',
 			// Server lifecycle
@@ -53,6 +53,10 @@ component accessors=true singleton {
 
 	function announceInterception( required string state, struct interceptData={} ) {
 		getEventPoolManager().processState( state, interceptData );
+	}
+
+	function processState( required string state, struct interceptData={} ) {
+		announceInterception( state, interceptData );
 	}
 
 	/**

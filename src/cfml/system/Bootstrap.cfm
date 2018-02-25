@@ -13,7 +13,7 @@ This file will stay running the entire time the shell is open
 <cfset variables.wireBox = application.wireBox>
 <cfsetting requesttimeout="86399913600" /><!--- 999999 days --->
 <!---Display this banner to users--->
-<cfoutput><cfsavecontent variable="banner">#chr( 27 )#[32m#chr( 27 )#[40m#chr( 27 )#[1m
+<cfoutput><cfsavecontent variable="banner">#chr( 27 )#[32m#chr( 27 )#[1m
    _____                                          _ ____
   / ____|                                        | |  _ \
  | |     ___  _ __ ___  _ __ ___   __ _ _ __   __| | |_) | _____  __
@@ -37,8 +37,9 @@ Type "help" for help, or "help [command]" to be more specific.#chr( 27 )#[0m
 	bufferedReader = createObject( 'java', 'java.io.BufferedReader' ).init( inputStreamReader );
 
 	// Verify if we can run CommandBox Java v. 1.7+
-	if( findNoCase( "1.6", server.java.version ) ){
-		systemOutput( "The Java Version you have (#server.java.version#) is not supported by CommandBox. Please install a Java JRE/JDK 1.7+" );
+	if( !findNoCase( "1.8", server.java.version ) ){
+		// JLine isn't loaded yet, so I have to use systemOutput() here.
+		systemOutput( "The Java Version you have (#server.java.version#) is not supported by CommandBox. Please install a Java JRE/JDK 1.8." );
 		sleep( 5000 );
 		abort;
 	}
@@ -117,6 +118,9 @@ Type "help" for help, or "help [command]" to be more specific.#chr( 27 )#[0m
 			if( clearScreen ){
 				shell.clearScreen();
 			}
+				
+			// Shut down the shell, which includes cleaing up JLine
+			shell.shutdown();
 
 			// Clear all caches: template, ...
 			SystemCacheClear( "all" );

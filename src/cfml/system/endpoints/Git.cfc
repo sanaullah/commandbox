@@ -30,6 +30,7 @@ component accessors="true" implements="IEndpoint" singleton {
 	property name="progressableDownloader" 	inject="ProgressableDownloader";
 	property name="progressBar" 			inject="ProgressBar";
 	property name="system" 					inject="system@constants";
+	property name="shell" 					inject="shell";
 
 
 	// Properties
@@ -98,6 +99,9 @@ component accessors="true" implements="IEndpoint" singleton {
 	        CommandCaller.call( local.result.checkout().setName( branch ) );
 
 		} catch( any var e ) {
+			// Check for Ctrl-C
+			shell.checkInterrupted();
+			
 			// If the exception came from the Java call, this exception won't be null
 			var theRealJavaException = CommandCaller.getException();
 
@@ -166,7 +170,10 @@ component accessors="true" implements="IEndpoint" singleton {
 
 	public function getUpdate( required string package, required string version, boolean verbose=false ) {
 		var result = {
-			isOutdated = true,
+			// Repo URLs with a semver in the name are considered to not have an update since we assume they are an exact version
+			isOutdated = !package
+				.listRest( '##' )
+				.reFindNoCase( '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' ),
 			version = 'unknown'
 		};
 

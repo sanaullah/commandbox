@@ -73,9 +73,9 @@ component accessors="true" singleton {
 	 *
 	 * @return the response from the user
  	 **/
-	string function ask( message, string mask='', string defaultResponse='' ) {
+	string function ask( message, string mask='', string defaultResponse='', keepHistory=false, highlight=true, complete=false ) {
 		print.toConsole();
-		return shell.ask( arguments.message, arguments.mask, arguments.defaultResponse );
+		return shell.ask( arguments.message, arguments.mask, arguments.defaultResponse, arguments.keepHistory, arguments.highlight, arguments.complete );
 	}
 
 	/**
@@ -155,8 +155,8 @@ component accessors="true" singleton {
 	 * @message.hint The error message to display
 	 * @clearPrintBuffer.hint Wipe out the print buffer or not, it does not by default
  	 **/
-	function error( required message, detail='', clearPrintBuffer=false ) {
-		setExitCode( 1 );
+	function error( required message, detail='', clearPrintBuffer=false, exitCode=1 ) {
+		setExitCode( exitCode );
 		hasErrored = true;
 		if( arguments.clearPrintBuffer ) {
 			// Wipe
@@ -235,6 +235,34 @@ component accessors="true" singleton {
 	*/
     function getEnv( required string key, defaultValue ) {
 		return systemSettings.getEnv( argumentCollection=arguments );
+	}
+
+
+	/**
+	* Call this method periodically in a long-running task to check and see
+	* if the user has hit Ctrl-C.  This method will throw an UserInterruptException
+	* which you should not catch.  It will unroll the stack all the way back to the shell
+	*/
+	function checkInterrupted() {
+		shell.checkInterrupted();
+	}
+
+	
+	/*
+	* Loads up Java classes into the class loader that loaded the CLI for immediate use. 
+	* You can pass either an array or list of:
+	* - directories
+	* - Jar files
+	* - Class files
+	*
+	* Note, loaded jars/classes cannot be unloaded and will remain in memory until the CLI exits.
+	* On Windows, the jar/class files will also be locked on the file system.  Directories are scanned
+	* recursively for for files and everything found will be loaded.
+	* 
+	* @paths List or array of absolute paths of a jar/class files or directories of them you would like loaded
+	*/
+	function classLoad( paths ) {
+		fileSystemUtil.classLoad( paths );
 	}
 
 

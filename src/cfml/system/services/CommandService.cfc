@@ -199,6 +199,7 @@ component accessors="true" singleton {
 			// If nothing was found, bail out here.
 			if( !commandInfo.found ){
 				var detail = generateListOfSimilarCommands( commandInfo );
+				shell.setExitCode( 1 );
 				throw( message='Command "#line#" cannot be resolved.', detail=detail, type="commandException");
 			}
 
@@ -223,6 +224,7 @@ component accessors="true" singleton {
 
 			// Parameters need to be ALL positional or ALL named
 			if( arrayLen( parameterInfo.positionalParameters ) && structCount( parameterInfo.namedParameters ) ){
+				shell.setExitCode( 1 );
 				throw( message='Please don''t mix named and positional parameters, it makes me dizzy.', detail=line, type="commandException");
 			}
 
@@ -239,6 +241,7 @@ component accessors="true" singleton {
 				// If we're using named parameters and this command has at least one param defined
 				if( structCount( parameterInfo.namedParameters ) ){
 					if( commandInfo.commandString == 'cfml' ) {
+						shell.setExitCode( 1 );
 						throw( message='Sorry, you can''t pipe data into a CFML function using named parameters since I don''t know the name of the piped parameter.', detail=line, type="commandException");
 					}
 					// Insert/overwrite the first param as our last result
@@ -266,8 +269,13 @@ component accessors="true" singleton {
 			// Merge flags into named params
 			mergeFlagParameters( parameterInfo );
 
-			// Add in defaults
-			addDefaultParameters( commandInfo.commandString, parameterInfo );
+			// Add in defaults for every possible alias of this command
+			[]
+				.append( commandInfo.commandReference.originalName )
+				.append( commandInfo.commandReference.aliases, true )
+				.each( function( thisName ) {
+					addDefaultParameters( thisName, parameterInfo );
+				} );
 
 			// Make sure we have all required params.
 			parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
@@ -555,6 +563,8 @@ component accessors="true" singleton {
 				tokens[1] = right( tokens[1], len( tokens[1] ) - 1 );
 				// tack on "run"
 				tokens.prepend( 'run' );
+			} else if( tokens.len() && tokens[1] == '!' ) {
+				tokens[1] = 'run' ;
 			}
 
 			/* If command is "run", merge all remaining tokens into one string
@@ -746,6 +756,7 @@ component accessors="true" singleton {
 			} catch( any e ){
 				// Log the full exception with stack trace
 				logger.error( 'Error creating command [#commandData.fullCFCPath#]. #e.message# #e.detail ?: ''#', e.stackTrace );
+				shell.setExitCode( 1 );
 				throw( message='Error creating command [#commandData.fullCFCPath#]', detail="#e.message# #CR# #e.detail ?: ''# #CR# #e.stacktrace#", type="commandException");
 			}
 		} // CFC exists check
@@ -819,7 +830,7 @@ component accessors="true" singleton {
 			var commandData = createCommandData( fullCFCPath, commandName );
 		// This will catch nasty parse errors so the shell can keep loading
 		} catch( any e ){
-			systemOutput( 'Error registering command [#fullCFCPath#]', true );
+			shell.printString( 'Error registering command [#fullCFCPath#]#cr#' );
 			logger.error( 'Error registering command [#fullCFCPath#]. #e.message# #e.detail ?: ''#', e.stackTrace );
 			// pretty print the exception
 			 shell.printError( e );
@@ -913,18 +924,19 @@ component accessors="true" singleton {
 	/**
 	 * Make sure we have all required params
  	 **/
-	private function ensureRequiredparams( userNamedParams, commandParams ){
+	function ensureRequiredparams( userNamedParams, commandParams ){
 		// For each command param
 		for( var param in commandParams ){
 			// If it's required and hasn't been supplied...
 			if( param.required && !structKeyExists( userNamedParams, param.name ) ){
 				// ... Ask the user
-				var message = 'Enter #param.name#';
+				var message = 'Enter #param.name# ';
 				var value  	= "";
 				// Verify hint
 				if( structKeyExists( param, 'hint' ) ){
-					message &= ' (#param.hint#) :';
+					message &= '(#param.hint#) ';
 				}
+				message &= ':';
 				// ask value logic
 				var askValue = function(){
 					// Is this a boolean value
@@ -967,12 +979,9 @@ component accessors="true" singleton {
 				if( ( paramData.type ?: 'any' ) == 'Globber' ) {
 
 					// Overwrite it with an actual Globber instance seeded with the original canonical path as the pattern.
-					var originalPath = parameterInfo.namedParameters[ paramName ].replace( '\', '/', 'all' );
-					var newPath = fileSystemUtil.resolvePath( originalPath ).replace( '\', '/', 'all' );
-					// Preserve any explicit trailing slashes
-					if( originalPath.endsWith( '/' ) && !newPath.endsWith( '/' ) ) {
-						newPath &= '/';
-					}
+					var originalPath = parameterInfo.namedParameters[ paramName ];
+					var newPath = fileSystemUtil.resolvePath( originalPath );
+					
 					parameterInfo.namedParameters[ paramName ] = wirebox.getInstance( 'Globber' )
 						.setPattern( newPath );
 				}
@@ -992,6 +1001,7 @@ component accessors="true" singleton {
 				&& param.type != 'Globber'
 				&& !isValid( param.type, userNamedParams[ param.name ] ) ){
 
+				shell.setExitCode( 1 );
 				throw( message='Parameter [#param.name#] has a value of [#userNamedParams[ param.name ]#] which is not of type [#param.type#].', type="commandException");
 			}
 		} // end for loop

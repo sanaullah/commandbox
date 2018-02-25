@@ -14,6 +14,7 @@ component accessors="true" singleton {
 	* The os
 	*/
 	property name="os";
+	property name="coreClassLoader";
 
 	// DI
 	property name="shell" inject="shell";
@@ -26,53 +27,109 @@ component accessors="true" singleton {
 	}
 
 	/**
+	* This resolves an absolute or relative path using the rules of the operating system and CLI.
+	* It doesn't follow CF mappings and will also always return a trailing slash if pointing to 
+	* an existing directory.
+	* 
 	* Resolve the incoming path from the file system
 	* @path.hint The directory to resolve
 	* @basePath.hint An expanded base path to resolve the path against. Defaults to CWD.
 	*/
 	function resolvePath( required string path, basePath=shell.pwd() ) {
 
-		try {
+		// The Java class will strip trailing slashses, but these are meaningful in globbing patterns
+		var trailingSlash = ( path.len() > 1 && ( path.endsWith( '/' ) || path.endsWith( '\' ) ) );
+		// java will remove trailing periods when canonicalizing a path.  I'm not sure that's correct.
+		var trailingPeriod = ( path.len() > 1 && path.endsWith( '.' ) );
+		
+		// Load our path into a Java file object so we can use some of its nice utility methods
+		var oPath = createObject( 'java', 'java.io.File' ).init( path );
 
-			// Load our path into a Java file object so we can use some of its nice utility methods
-			var oPath = createObject( 'java', 'java.io.File' ).init( path );
+		// If we're on windows and the path starts with a single / or \
+		if( isWindows() && reFind( '^[\\/][^\\/]', path ) ) {
 
-			// This tells us if it's a relative path
-			// Note, at this point we don't actually know if it actually even exists yet
+			// Concat it with the drive root in the base path so "/foo" becomes "C:/foo" (if the basepath is C:/etc)
+			oPath = createObject( 'java', 'java.io.File' ).init( listFirst( arguments.basePath, '/\' ) & '/' & path );
 
-			// If we're on windows and the path starts with / or \
-			if( isWindows() && reFind( '^[\\\/]', path ) ) {
+		// If path is "~"
+		// Note, we're supporting this on Windows as well as Linux because it seems useful
+		} else if( path == '~' ) {
 
-				// Concat it with the drive root in the base path so "/foo" becomes "C:/foo" (if the basepath is C:/etc)
-				oPath = createObject( 'java', 'java.io.File' ).init( listFirst( arguments.basePath, '/\' ) & '/' & path );
+			var userHome = createObject( 'java', 'java.lang.System' ).getProperty( 'user.home' );
+			oPath = createObject( 'java', 'java.io.File' ).init( userHome );
 
-			// If path is "~"
-			// Note, we're supporting this on Windows as well as Linux because it seems useful
-			} else if( path == '~' ) {
+		// If path starts with "~/something" but not "~foo" (a valid folder name)
+		} else if( reFind( '^~[\\\/]', path ) ) {
 
-				var userHome = createObject( 'java', 'java.lang.System' ).getProperty( 'user.home' );
-				oPath = createObject( 'java', 'java.io.File' ).init( userHome );
+			oPath = createObject( 'java', 'java.io.File' ).init( userHome & right( path, len( path ) - 1 ) );
 
-			// If path starts with "~/something" but not "~foo" (a valid folder name)
-			} else if( reFind( '^~[\\\/]', path ) ) {
+		// This tells us if it's a relative path
+		// Note, at this point we don't actually know if it actually even exists yet
+		} else if( !oPath.isAbsolute() ) {
 
-				oPath = createObject( 'java', 'java.io.File' ).init( userHome & right( path, len( path ) - 1 ) );
-
-			} else if( !oPath.isAbsolute() ) {
-
-				// If it's relative, we assume it's relative to the current working directory and make it absolute
-				oPath = createObject( 'java', 'java.io.File' ).init( arguments.basePath & '/' & path );
-
-			}
-
-			// This will standardize the name and calculate stuff like ../../
-			return getCanonicalPath( oPath.toString() );
-
-		} catch ( any e ) {
-			rethrow;
-			return arguments.basePath & '/' & path;
+			// If it's relative, we assume it's relative to the current working directory and make it absolute
+			oPath = createObject( 'java', 'java.io.File' ).init( arguments.basePath & '/' & path );
 		}
+		
+		// Add back trailing slash if we had it
+		var finalPath = oPath.toString() & ( trailingSlash ? server.separator.file : '' );
+		
+		// This will standardize the name and calculate stuff like ../../
+		finalPath = getCanonicalPath( finalPath )
+		
+		// have to add back the period after canonicalizing since Java removes it!
+		return finalPath & ( trailingPeriod && !finalPath.endsWith( '.' ) ? '.' : '' );
 
+	}
+
+	/**
+	* I wrote my own version of this because the getCanonicalPath() runs isDirectory() and exists()
+	* checks inside of it which SLOW DOWN when ran tens of thousands of times at once!
+	* This function differs from getCanonicalPath() in that it won't append a trailing slash
+	* if the path points to an actual folder.  
+	* 
+	* @path The path to Canonicalize
+	*/
+	string function calculateCanonicalPath( required string path ) {
+		// Trailing slashses are meaningful in globbing patterns
+		var trailingSlash = ( path.len() > 1 && ( path.endsWith( '/' ) || path.endsWith( '\' ) ) );
+		var pathArr = path.listToArray( '/\' );
+			
+		// Empty string for Unix
+		if( path.left( 1 ) == '/' ) {
+			var root = '';
+		// Windows network share like //server-name
+		} else if( path.left( 2 ) == '\\' ) {
+			var root = '\\';
+		// C:, D:, etc for Windows
+		} else {
+			var root = path.listFirst( '/\' );
+			pathArr.deleteAt( 1 );
+		}
+		
+		var newPathArr = [];
+		// Loop over path
+		for( var pathElem in pathArr ) {
+			// For every ../ trim a folder off the accumulated path
+			if( pathElem == '..' ) {
+				if( newPathArr.len() ) {
+					newPathArr.deleteAt( newPathArr.len() );
+				}
+			// "normal" folder names just get appended
+			} else {
+				newPathArr.append( pathElem );	
+			}
+		}
+		
+		// Re-attach the drive root and turn the array back into a slash-delimted path
+		var tmpPath = newPathArr.toList( server.separator.file ) & ( trailingSlash ? server.separator.file : '' );
+		
+		if( root == '\\' ) {
+			return root & tmpPath;
+		} else {
+			return root & server.separator.file & tmpPath;			
+		}
+		
 	}
 
 	/**
@@ -209,9 +266,25 @@ component accessors="true" singleton {
     		// TODO: Unix paths with a period in a folder name are likely still a problem.
     		return arguments.absolutePath;
     	}
+    	
+		// UNC network path.
+		if( arguments.absolutePath.left( 2 ) == '\\' ) {
+			// Strip the \\
+			arguments.absolutePath = arguments.absolutePath.right( -2 );
+			if( arguments.absolutePath.listLen( '/\' ) < 2 ) {
+				throw( 'Can''t make relative path for [#absolutePath#].  A mapping must point ot a share name, not the root of the server name.' );
+			}
+			
+			// server/share
+	    	var UNCShare = listFirst( arguments.absolutePath, '/\' ) & '/' & listGetAt( arguments.absolutePath, 2, '/\' );
+	    	// everything after server/share
+	    	var path = arguments.absolutePath.listDeleteAt( 1, '/\' ).listDeleteAt( 1, '/\' );
+	    	var mapping = locateUNCMapping( UNCShare );
+	    	return mapping & '/' & path;
+    	
     	// If one of the folders has a period, we've got to do something special.
     	// C:/users/brad.development/foo.cfc turns into /C__users_brad_development/foo.cfc
-    	if( getDirectoryFromPath( arguments.absolutePath ) contains '.' ) {
+    	} else if( getDirectoryFromPath( arguments.absolutePath ) contains '.' ) {
     		var mappingPath = getDirectoryFromPath( arguments.absolutePath );
     		mappingPath = mappingPath.replace( '\', '/', 'all' );
     		mappingPath = mappingPath.listChangeDelims( '/', '/' );
@@ -229,7 +302,7 @@ component accessors="true" singleton {
     	} else {
 	    	var driveLetter = listFirst( arguments.absolutePath, ':' );
 	    	var path = listRest( arguments.absolutePath, ':' );
-	    	var mapping = locateMapping( driveLetter );
+	    	var mapping = locateDriveMapping( driveLetter );
 	    	return mapping & path;
     	}
     }
@@ -238,13 +311,24 @@ component accessors="true" singleton {
     * Accepts a Windows drive letter and returns a CF Mapping
     * Creates the mapping if it doesn't exist
     */
-    string function locateMapping( required string driveLetter  ) {
+    string function locateDriveMapping( required string driveLetter  ) {
     	var mappingName = '/' & arguments.driveLetter & '_drive';
     	var mappingPath = arguments.driveLetter & ':/';
     	createMapping( mappingName, mappingPath );
    		return mappingName;
     }
 
+    /**
+    * Accepts a Windows UNC network share and returns a CF Mapping
+    * Creates the mapping if it doesn't exist
+    */
+    string function locateUNCMapping( required string UNCShare  ) {
+    	var mappingName = '/' & arguments.UNCShare.replace( '/', '_' ) & '_UNC';
+    	var mappingPath = '\\' & arguments.UNCShare & '/';
+    	createMapping( mappingName, mappingPath );
+   		return mappingName;
+    }
+    
     function createMapping( mappingName, mappingPath ) {
     	var mappings = getApplicationSettings().mappings;
     	if( !structKeyExists( mappings, mappingName ) || mappings[ mappingName ] != mappingPath ) {
@@ -252,5 +336,90 @@ component accessors="true" singleton {
     		application action='update' mappings='#mappings#';
    		}
     }
+	
+	/*
+	* Turns all slashes in a path to forward slashes except for \\ in a Windows UNC network share
+	*/
+	function normalizeSlashes( string path ) {
+		if( path.left( 2 ) == '\\' ) {
+			return '\\' & path.replace( '\', '/', 'all' ).right( -2 );
+		} else {
+			return path.replace( '\', '/', 'all' );			
+		}
+	}
+	
+	/*
+	* Loads up Java classes into the class loader that loaded the CLI for immediate use. 
+	* You can pass either an array or list of:
+	* - directories
+	* - Jar files
+	* - Class files
+	*
+	* Note, loaded jars/classes cannot be unloaded and will remain in memory until the CLI exits.
+	* On Windows, the jar/class files will also be locked on the file system.  Directories are scanned
+	* recursively for for files and everything found will be loaded.
+	* 
+	* @paths List or array of absolute paths of a jar/class files or directories of them you would like loaded
+	*/
+	function classLoad( any paths ) {
+		
+		// Allow list or arrays
+		if( isSimpleValue( paths ) ) {
+			paths = paths.listToArray();
+		}
+
+		// For each path....
+		paths.each( function( path ) {
+
+			// Is file
+			if( fileExists( path ) ) {
+				_classLoad( path );
+			// Is directory
+			} else if( directoryExists( path ) ) {
+				directoryList( path, true, 'array', '*.jar|*.class' )
+					.each( function( file ) {
+						_classLoad( file );
+					} );
+			// Is ????
+			} else {
+				throw( message='The path [#path#] doesn''t exist on your file system.', detail='Make sure you expand any paths you send in.', type="commandException" );
+			}
+
+		} );
+	}
+	
+	/*
+	* Loads up a jar or class file into the core Lucee classloader.  Note, jars cannot be unloaded and their classes
+	* will remain in memory until the CLI exits.  On Windows, the jar files will also be locked on the file system.
+	* 
+	* @path The absolute path of a jar or class file you would like loaded
+	*/
+	function _classLoad( string path ) {
+		path = normalizeSlashes( path );
+		var jURL = createObject( 'java', 'java.io.File' ).init( path ).toURI().toURL();
+		var cl = getCoreClassLoader();
+		
+		// Don't add it if it's already there.
+		for( var lib in cl.getURLs() ) {
+			if( lib.File contains jURL.getFile() ) {
+				return;
+			}
+		}
+		
+		var method = cl.getClass().getDeclaredMethod("addURL", [ jURL.getClass() ] );
+		method.setAccessible(true);
+		method.invoke( cl, [ jURL ] );		
+	}
+	
+	/*
+	* Get the Lucee core class loader
+	*/
+	function getCoreClassLoader( string path ) {
+		
+		if( isNull( coreClassLoader ) ) {
+			coreClassLoader = createObject( 'java', 'cliloader.LoaderCLIMain' ).getClassLoader();
+		}
+		return coreClassLoader;		
+	}
 
 }

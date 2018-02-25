@@ -33,7 +33,8 @@
 */
 component {
 
-	property name='cr' inject='cr@constants' scope='this';
+	property name='cr'		inject='cr@constants' scope='this';
+	property name='shell'	inject='shell';
 
 	this.tab 		= chr( 9 );
 	this.esc 		= chr( 27 );
@@ -77,8 +78,7 @@ component {
 	 * @string.hint string to remove ANSI from
   	 **/
 	function unansi(required ansiString) {
-		var st = createObject("java","org.fusesource.jansi.AnsiString").init(ansiString);
-		return st.getPlain();
+		return createObject("java","org.jline.utils.AttributedString").stripAnsi( ansiString );
 	}
 
 	/**
@@ -89,8 +89,14 @@ component {
   	 **/
 	function onMissingMethod( missingMethodName, missingMethodArguments ) {
 
+		// Check for Ctrl-C
+		shell.checkInterrupted();
+		
 		// Flag for if this is a line or not
 		var newLine = false;
+		
+		// Keep track of bold separatley 
+		var bold = false;
 
 		// Name of the method to chop up
 		var methodName = missingMethodName;
@@ -115,9 +121,13 @@ component {
 				// Check for an attribute match
 				var attribLen = len( attrib );
 				if( left( methodName, attribLen ) == attrib ) {
-
-					// Add that attribute to the string
-					ANSIString &= getANSIAttribute( this.ANSIAttributes[ attrib ] );
+					// Bold gets added at the end
+					if( attrib == 'bold' ) {
+						bold = true;
+					} else {
+						// Add that attribute to the string
+						ANSIString &= getANSIAttribute( this.ANSIAttributes[ attrib ] );						
+					}
 					// Slice this bit off the method name
 					methodName  = mid( methodName, attribLen+1, len( methodName ) );
 					foundANSI = true;
@@ -168,7 +178,11 @@ component {
 		} // End While loop
 
 		// Don't mess with the string if we didn't format it
-		if( len( ANSIString ) ) {
+		if( len( ANSIString ) || bold ) {
+			// Bold doesn't always work if it's not at the end
+			if( bold ) {
+				ANSIString &= getANSIAttribute( this.ANSIAttributes[ 'bold' ] );
+			} 
 			text = ANSIString & text;
 			if( !noEnd ) {
 				text &= getANSIAttribute( this.ANSIAttributes["off"] );

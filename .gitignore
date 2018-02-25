@@ -1,18 +1,16 @@
-# Build Folders
+# Build Folders & OS
 /dist
 /build/build.number
 /build/temp
 /build/requires.txt
 /lib
 /src/cfml/box.json
-settings.xml
-.project
 WEB-INF
 tests/results
 tests/work
 Icon?
 src/cfml/logs
-build/launch4j
+build/launch4j-*
 tests/testbox
 /mxunit
 /apidocs/CommandBox-CommandDocs/
@@ -24,6 +22,13 @@ org.eclipse.jdt.ui.prefs
 apidocs/docbox
 commandbox.rb
 /testbox
+jmimemagic.log
 
 # CommandBox config
 src/CommandBox.json
+.classpath
+
+# IDE
+.vscode
+settings.xml
+.project

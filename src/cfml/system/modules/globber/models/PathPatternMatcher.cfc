@@ -40,6 +40,7 @@ component accessors="true" singleton {
 	*/
 	boolean function matchPattern( required string pattern, required string path, boolean exact=false) {
 		// Normalize slashes
+		// This will turn a Windows UNC path into //server, but it will at least be consitent across pattern and path
 		arguments.pattern = replace( arguments.pattern, '\', '/', 'all' );
 		arguments.path = replace( arguments.path, '\', '/', 'all' );
 
@@ -51,8 +52,16 @@ component accessors="true" singleton {
 		// build a regex based on the pattern
 		var regex = arguments.pattern;
 
-		// Escape any periods in the pattern
+		// Escape any regex metacharacters in the pattern
 		regex = replace( regex, '.', '\.', 'all' );
+		regex = replace( regex, '(', '\(', 'all' );
+		regex = replace( regex, ')', '\)', 'all' );
+		regex = replace( regex, '^', '\^', 'all' );
+		regex = replace( regex, '$', '\$', 'all' );
+		regex = replace( regex, '|', '\|', 'all' );
+		regex = replace( regex, '+', '\+', 'all' );
+		regex = replace( regex, '{', '\{', 'all' );
+		regex = replace( regex, '}', '\}', 'all' );
 
 		// /**/ matches zero or more directories (at least one /)
 		regex = replace( regex, '/**/', '__zeroOrMoreDirs_', 'all' );
@@ -89,10 +98,7 @@ component accessors="true" singleton {
 		} else {
 			regex &= '.*';
 		}
-
-
-		//systemoutput(regex, true);
-		//systemoutput(arguments.path, true);
+		
 		return ( reFindNoCase( regex, arguments.path ) > 0 );
 	}
 
@@ -102,12 +108,36 @@ component accessors="true" singleton {
 	* @path.hint The file system path to test.  Can be a file or directory.  Direcories MUST end with a trailing slash
 	*/
 	boolean function matchPatterns( required array patterns, required string path ){
+		var matched = false;
 		for( var pattern in arguments.patterns ) {
-			if( matchPattern( pattern, arguments.path ) ) {
-				return true;
+			if ( isExclusion( pattern ) ) {
+				var patternWithoutBang = mid( pattern, 2, len( pattern ) - 1 );
+				if ( matchPattern( patternWithoutBang, arguments.path ) ) {
+					matched = false;
+				}
+			}
+			else {
+				if ( matchPattern( pattern, arguments.path ) ) {
+					matched = true;
+				}
 			}
 		}
-		return false;
+		return matched;
+	}
+
+	boolean function isExclusion( required string pattern ) {
+		return left( pattern, 1 ) == "!";
+	}
+	
+	/*
+	* Turns all slashes in a path to forward slashes except for \\ in a Windows UNC network share
+	*/
+	function normalizeSlashes( string path ) {
+		if( path.left( 2 ) == '\\' ) {
+			return '\\' & path.replace( '\', '/', 'all' ).right( -2 );
+		} else {
+			return path.replace( '\', '/', 'all' );			
+		}
 	}
 
 }
