@@ -30,7 +30,7 @@ component accessors="true" singleton="true" {
 	* @serverHomeDirectory Override where the server's home with be
 	**/
 	public function install( required cfengine, required baseDirectory, required struct serverInfo, required string serverHomeDirectory ) {
-		var version = listLen( cfengine, "@" )>1 ? listLast( cfengine, "@" ) : "";
+		var version = listLen( cfengine, "@" )>1 ? listLast( cfengine, "@" ) : "stable";
 		var engineName = listFirst( cfengine, "@" );
 		arguments.baseDirectory = !arguments.baseDirectory.endsWith( "/" ) ? arguments.baseDirectory & "/" : arguments.baseDirectory;
 
@@ -260,7 +260,7 @@ component accessors="true" singleton="true" {
 
 			directoryCreate( installDetails.installDir & '/WEB-INF', true, true );
 			directoryCopy( '/commandbox-home/lib', thislib, false, '*.jar' );
-			fileCopy( '/commandbox/system/config/web.xml', thisWebinf & '/web.xml');
+			fileCopy( expandPath( '/commandbox/system/config/web.xml' ), thisWebinf & '/web.xml');
 
 			// Mark this WAR as being exploded already
 			fileWrite( engineTagFile, thisEngineTag );
