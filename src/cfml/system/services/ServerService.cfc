@@ -133,10 +133,11 @@ component accessors="true" singleton {
 				'host' : d.web.host ?: '127.0.0.1',
 				'directoryBrowsing' : d.web.directoryBrowsing ?: true,
 				'webroot' : d.web.webroot ?: '',
-				// Duplicate so onServerStart interceptors don't actually change config settings via refernce.
+				// Duplicate so onServerStart interceptors don't actually change config settings via reference.
 				'aliases' : duplicate( d.web.aliases ?: {} ),
-				// Duplicate so onServerStart interceptors don't actually change config settings via refernce.
+				// Duplicate so onServerStart interceptors don't actually change config settings via reference.
 				'errorPages' : duplicate( d.web.errorPages ?: {} ),
+				'accessLogEnable' : d.web.accessLogEnable ?: false,
 				'welcomeFiles' : d.web.welcomeFiles ?: '',
 				'HTTP' : {
 					'port' : d.web.http.port ?: 0,
@@ -155,6 +156,7 @@ component accessors="true" singleton {
 				},
 				'rewrites' : {
 					'enable' : d.web.rewrites.enable ?: false,
+					'logEnable' : d.web.rewrites.logEnable ?: false,
 					'config' : d.web.rewrites.config ?: variables.rewritesDefaultConfig,
 					'statusPath' : d.web.rewrites.statusPath ?: '',
 					'configReloadSeconds' : d.web.rewrites.configReloadSeconds ?: ''
@@ -174,7 +176,9 @@ component accessors="true" singleton {
 				'WARPath' : d.app.WARPath ?: '',
 				'cfengine' : d.app.cfengine ?: '',
 				'restMappings' : d.app.cfengine ?: '',
-				'serverHomeDirectory' : d.app.serverHomeDirectory ?: ''
+				'serverHomeDirectory' : d.app.serverHomeDirectory ?: '',
+				'sessionCookieSecure' : d.app.sessionCookieSecure ?: false,
+				'sessionCookieHTTPOnly' : d.app.sessionCookieHTTPOnly ?: false
 			},
 			'runwar' : {
 				'args' : d.runwar.args ?: ''
@@ -256,16 +260,37 @@ component accessors="true" singleton {
 			consoleLogger.error( 'Overwriting a running server means you won''t be able to use the "stop" command to stop the original one.' );
 			consoleLogger.warn( 'Use the --force parameter to skip this check.' );
 			consoleLogger.error( '.' );
-			// Collect a new name
-			var newName = shell.ask( 'Provide a unique "name" for this server (leave blank to keep starting as-is): ' );
-			// If a name is provided, start over.  Otherwise, just keep starting.
-			// The recursive call here will subject their answer to the same check until they provide a name that hasn't been used for this folder.
-			if( len( newName ) ) {
-				serverProps.name = newName;
-				//copy the orig server's server.json file to the new file so it starts with the same properties as the original. lots of alternative ways to do this but the file copy works and is simple
-				file action='copy' source="#defaultServerConfigFile#" destination=fileSystemUtil.resolvePath( serverProps.directory ?: '' ) & "/server-#serverProps.name#.json" mode ='777';
-				return start( serverProps );
+			// Ask the user what they want to do
+			var action = wirebox.getInstance( 'multiselect' )
+				.setQuestion( 'What would you like to do? ' )
+				.setOptions( [
+					{ display : 'Provide a new name for this server (recommended)', value : 'newName', accessKey='N', selected=true },
+					{ display : 'Just keep starting this new server and overwrite the old, running one.', value : 'overwrite', accessKey='o' },
+					{ display : 'Stop and do not start a server right now.', value : 'stop', accessKey='s' }
+				] )
+				.setRequired( true )
+				.ask();
+
+			if( action == 'stop' ) {
+				consoleLogger.error( 'Aborting...' );
+				return;
+			} else if( action == 'newname' ) {
+				
+				// Collect a new name
+				var newName = shell.ask( 'Provide a new unique "name" for this server: ' );
+				// If a name is provided, start over.  Otherwise, just keep starting.
+				// The recursive call here will subject their answer to the same check until they provide a name that hasn't been used for this folder.
+				if( len( newName ) ) {
+					serverProps.name = newName;
+					//copy the orig server's server.json file to the new file so it starts with the same properties as the original. lots of alternative ways to do this but the file copy works and is simple
+					file action='copy' source="#defaultServerConfigFile#" destination=fileSystemUtil.resolvePath( serverProps.directory ?: '' ) & "/server-#serverProps.name#.json" mode ='777';
+					return start( serverProps );
+				}
+					
+			} else {
+				consoleLogger.warn( 'Overwriting previous server [#serverInfo.name#].' );
 			}
+			
 		}
 
 		// *************************************************************************************
@@ -622,6 +647,9 @@ component accessors="true" singleton {
 		// trayOptions aren't accepted via command params due to no clean way to provide them
 		serverInfo.trayOptions.append( serverJSON.trayOptions, true );
 
+		serverInfo.accessLogEnable	= serverJSON.web.accessLogEnable ?: defaults.web.accessLogEnable; 
+		serverInfo.rewriteslogEnable = serverJSON.web.rewrites.logEnable ?: defaults.web.rewrites.logEnable;
+				
 		// Global defauls are always added on top of whatever is specified by the user or server.json
 		serverInfo.JVMargs			= ( serverProps.JVMargs			?: serverJSON.JVM.args ?: '' ) & ' ' & defaults.JVM.args;
 
@@ -667,6 +695,9 @@ component accessors="true" singleton {
 		if( isDefined( 'serverJSON.app.serverHomeDirectory' ) && len( serverJSON.app.serverHomeDirectory ) ) { serverJSON.app.serverHomeDirectory = fileSystemUtil.resolvePath( serverJSON.app.serverHomeDirectory, defaultServerConfigFileDirectory ); }
 		if( isDefined( 'defaults.app.serverHomeDirectory' ) && len( defaults.app.serverHomeDirectory )  ) { defaults.app.serverHomeDirectory = fileSystemUtil.resolvePath( defaults.app.serverHomeDirectory, defaultwebroot ); }
 		serverInfo.serverHomeDirectory			= serverProps.serverHomeDirectory			?: serverJSON.app.serverHomeDirectory			?: defaults.app.serverHomeDirectory;
+
+		serverInfo.sessionCookieSecure			= serverJSON.app.sessionCookieSecure			?: defaults.app.sessionCookieSecure;
+		serverInfo.sessionCookieHTTPOnly			= serverJSON.app.sessionCookieHTTPOnly			?: defaults.app.sessionCookieHTTPOnly;
 
 		// These are already hammered out above, so no need to go through all the defaults.
 		serverInfo.serverConfigFile	= defaultServerConfigFile;
@@ -715,7 +746,6 @@ component accessors="true" singleton {
 			// TODO: As of 3.5 "serverHome" is for backwards compat.  Remove in later version in favor of serverHomeDirectory above
 			serverInfo[ 'serverHome' ] = installDetails.installDir;
 			serverInfo.logdir = serverInfo.serverHomeDirectory & "/logs";
-			serverInfo.consolelogPath	= serverInfo.logdir & '/server.out.txt';
 			serverInfo.engineName = installDetails.engineName;
 			serverInfo.engineVersion = installDetails.version;
 
@@ -777,9 +807,13 @@ component accessors="true" singleton {
 			}
 			// Create a custom server folder to house the logs
 			serverInfo.logdir = serverinfo.customServerFolder & "/logs";
-			serverInfo.consolelogPath	= serverInfo.logdir & '/server.out.txt';
 		}
-
+		
+		// logdir is set above and is different for WARs and CF engines
+		serverInfo.consolelogPath = serverInfo.logdir & '/server.out.txt';
+		serverInfo.accessLogPath = serverInfo.logDir & '/access.txt';
+		serverInfo.rewritesLogPath = serverInfo.logDir & '/rewrites.txt';
+		 
 		// Find the correct tray icon for this server
 		if( !len( serverInfo.trayIcon ) ) {
 			var iconSize = fileSystemUtil.isWindows() ? '-32px' : '';
@@ -905,7 +939,7 @@ component accessors="true" singleton {
 		 	.append( '--host' ).append( serverInfo.host )
 		 	.append( '--stop-port' ).append( serverInfo.stopsocket )
 		 	.append( '--processname' ).append( processName )
-		 	.append( '--log-dir' ).append( serverInfo.logDir )
+		 	.append( '--log-dir' ).append( serverInfo.logDir )		 	
 		 	.append( '--server-name' ).append( serverInfo.name )
 		 	.append( '--tray-icon' ).append( serverInfo.trayIcon )
 		 	.append( '--tray-config' ).append( trayOptionsPath )
@@ -913,19 +947,19 @@ component accessors="true" singleton {
 		 	.append( '--directoryindex' ).append( serverInfo.directoryBrowsing )
 		 	.append( '--timeout' ).append( serverInfo.startTimeout )
 		 	.append( '--proxy-peeraddress' ).append( 'true' )
+		 	.append( '--cookie-secure' ).append( serverInfo.sessionCookieSecure )
+		 	.append( '--cookie-httponly' ).append( serverInfo.sessionCookieHTTPOnly )
 		 	.append( serverInfo.runwarArgs.listToArray( ' ' ), true );
 
 		if( serverInfo.debug ) {
 			// Debug is getting turned on any time I include the --debug flag regardless of whether it's true or false.
 			args.append( '--debug' ).append( serverInfo.debug );
 		}
-
-		// Runwar will blow up if there isn't a parameter supplied, so I can't pass an empty string.
+		
 		if( len( serverInfo.restMappings ) ) {
 			args.append( '--servlet-rest-mappings' ).append( serverInfo.restMappings );
 		} else {
-			// This effectively disables it (assuming there's not a real directory or route called "___disabled___") but it's janky
-			args.append( '--servlet-rest-mappings' ).append( '___DISABLED___' );
+			args.append( '--servlet-rest-mappings' ).append( '__DISABLED__' );
 		}
 
 		if( serverInfo.trace ) {
@@ -935,6 +969,24 @@ component accessors="true" singleton {
 		if( len( errorPages ) ) {
 			args.append( '--error-pages' ).append( errorPages );
 		}
+
+		if( serverInfo.accesslogenable ) {
+			args
+				.append( '--logaccess-enable' ).append( true )
+			 	.append( '--logaccess-basename' ).append( 'access' )
+			 	.append( '--logaccess-dir' ).append( serverInfo.logDir );
+		}
+		
+		if( serverInfo.rewritesLogEnable ) {
+			args.append( '--urlrewrite-log' ).append( serverInfo.rewritesLogPath );
+		}
+		 
+		/* 	.append( '--logrequests-enable' ).append( true )
+		 	.append( '--logrequests-basename' ).append( 'request' )
+		 	.append( '--logrequests-dir' ).append( serverInfo.logDir )
+		 	*/
+		
+		
 	 	if( len( CFEngineName ) ) {
 	 		 args.append( '--cfengine-name' ).append( CFEngineName );
 	 	}
@@ -1069,6 +1121,20 @@ component accessors="true" singleton {
 	    var processBuilder = createObject( "java", "java.lang.ProcessBuilder" );
 	    // Pass array of tokens comprised of command plus arguments
 	    args.prepend( serverInfo.javaHome );
+	    
+	    // In *nix OS's we need to separate the server process from the CLI process
+	    // so SIGINTs from Ctrl-C won't also kill previously started servers
+	    if( !fileSystemUtil.isWindows() && background ) {
+	    	// The shell script will take care of creating this file and emptying it every time
+	    	var nohupLog = '#serverInfo.serverHomeDirectory#/nohup.log';
+	    	// Pass log file to external process.  This is no we can capture the output of the server process
+	    	args.prepend( '#serverInfo.serverHomeDirectory#/nohup.log' );
+	    	// Use this intermediate shell script to start our server via nohup
+	    	args.prepend( expandPath( '/server-commands/bin/server_spawner.sh' ) );
+	    	// Pass script directly to bash so I don't have to worry about it being executable
+			args.prepend( expandPath( '/bin/bash' ) );
+	    }
+	    
 	    processBuilder.init( args );
 	    // Conjoin standard error and output for convenience.
 	    processBuilder.redirectErrorStream( true );
@@ -1102,23 +1168,38 @@ component accessors="true" singleton {
 
 				var line = bufferedReader.readLine();
 				while( !isNull( line ) ){
-					// Clean log4j cruft from line
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - processoutput: ', '' );
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger processoutput: ', '' );
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger lib: ', 'Runwar: ' );
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - ', 'Runwar: ' );
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger - ', 'Runwar: ' );
-					line = reReplaceNoCase( line, '^.* (INFO|DEBUG|ERROR|WARN) RunwarLogger ', 'Runwar: ' );
-
-					// Build up our output
-					startOutput.append( line & chr( 13 ) & chr( 10 ) );
 
 					// output it if we're being interactive
-					if( attributes.interactiveStart ) {
+					if( attributes.interactiveStart ) {					
+						
+						// Debug non-console starts have nested log output
+						// Ex:
+						// [INFO ] runwar.server: processoutput: [INFO ] runwar.context: Apr 11, 2018 15:57:32 PM Information [main] - Event Gateway Disabled.
+						line = reReplaceNoCase( line, '^\[[^]]*] runwar\.server: processoutput: ', '' );
+						
+						// Log messages from the CF engine or app code writing direclty to std/err out strip off "runwar.context" but leave color coded severity
+						// Ex:
+						// [INFO ] runwar.context: 04/11 15:47:10 INFO Starting Flex 1.5 CF Edition
+						line = reReplaceNoCase( line, '^(\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
+						
+						// Log messages from runwar itself, simplify the logging category to just "Runwar:" and leave color coded severity
+						// Ex:
+						// [DEBUG] runwar.config: Enabling Proxy Peer Address handling
+						// [DEBUG] runwar.server: Starting open browser action
+						line = reReplaceNoCase( line, '^(\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
+	
+						// Log messages from any other 3rd party java lib tapping into Log4j will be left alone
+						// Ex:
+						// [DEBUG] org.tuckey.web.filters.urlrewrite.RuleExecutionOutput: needs to be forwarded to /index.cfm/Main
+	
+						// Build up our output
+						startOutput.append( line & chr( 13 ) & chr( 10 ) );
+
 						print
 							.line( line )
 							.toConsole();
 					}
+					
 					line = bufferedReader.readLine();
 				} // End of inputStream
 
@@ -1732,6 +1813,8 @@ component accessors="true" singleton {
 			'name'				: "",
 			'logDir' 			: "",
 			'consolelogPath'	: "",
+			'accessLogPath'		: "",
+			'rewritesLogPath'	: "",
 			'trayicon' 			: "",
 			'libDirs' 			: "",
 			'webConfigDir' 		: "",
@@ -1762,12 +1845,16 @@ component accessors="true" singleton {
 			'runwarArgs'		: "",
 			'cfengine'			: "",
 			'restMappings'		: "",
+			'sessionCookieSecure'	: false,
+			'sessionCookieHTTPOnly'	: false,
 			'engineName'		: "",
 			'engineVersion'		: "",
 			'WARPath'			: "",
 			'serverConfigFile'	: "",
 			'aliases'			: {},
 			'errorPages'		: {},
+			'accessLogEnable'	: false,
+			'rewritesLogEnable'	: false,
 			'trayOptions'		: {},
 			'trayEnable'		: true,
 			'dateLastStarted'	: '',
