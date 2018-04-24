@@ -9,10 +9,16 @@
 *
 */
 component singleton {
-
+	
 	// DI
-	property name='system' inject='system@constants';
-	property name='shell' inject='shell';
+	property name='system'	inject='system@constants';
+	property name='shell'	inject='shell';
+	property name='print'	inject='Print';
+	property name='job'		inject='provider:InteractiveJob';
+
+	function init() {
+		variables.attr = createObject( 'java', 'org.jline.utils.AttributedString' );
+	}
 
 	/**
 	* Call me to update the screen.  If another thread outputs to the console in the mean time, it will mess it up.
@@ -36,9 +42,16 @@ component singleton {
 		if( terminal.getWidth() == 0 ) {
 			return;
 		}
+		
 		var display = createObject( 'java', 'org.jline.utils.Display' ).init( terminal, false );
 		display.resize( terminal.getHeight(), terminal.getWidth() );
 		var progressRendered = '';
+				
+		var lines = [];
+		// If there is a currently running job, include its output first so we don't overwrite each other
+		if( job.getActive() ) {
+			lines = job.getLines();
+		}
 		
 		// We don't know the total size (all we can show is the amount downloaded thus far)
 		if( totalSizeKB == -1 ) {
@@ -47,14 +60,21 @@ component singleton {
 			progressRendered = replace( progressBarTemplate, '$$$$$$$', formatSize( arguments.completeSizeKB, 7 ) );
 			progressRendered = replace( progressRendered, '&&&&&&&&', formatSize( min( arguments.speedKBps, 99000), 6 ) & 'ps' );
 		
+			
+			lines.append( [
+					attr.fromAnsi( progressRendered ),
+				],
+				true
+			);		
+		
 		// We do know the total size (show percentages)
 		} else {
 			
 			// Total space availble to progress bar.  Subtract 5 for good measure since it will wrap if you get too close
-			var totalWidth = shell.getTermWidth()-5	;
+			var totalWidth = shell.getTermWidth()-5;
 	
 			// TODO: ETA
-			var progressBarTemplate = '@@@% [=>] $$$$$$$ / ^^^^^^^  (&&&&&&&&)';
+			var progressBarTemplate = '|@@@% |=>| $$$$$$$ / ^^^^^^^ | &&&&&&&& |';
 			// Dynamically assign the remaining width to the moving progress bar
 			var nonProgressChars = len( progressBarTemplate ) - 1;
 			// Minimum progressbar length is 5.  It will wrap if the user's console is super short, but I'm not sure I care.
@@ -62,33 +82,73 @@ component singleton {
 	
 			// Get the template
 			progressRendered = progressBarTemplate;
-	
+			
 			// Replace percent
-			progressRendered = replace( progressRendered, '@@@', numberFormat( arguments.percent, '___' ) );
+			progressRendered = replace( progressRendered, '@@@%', print.yellow1( numberFormat( arguments.percent, '___' ) & '%' ) );
 	
 			// Replace actual progress bar
 			var progressSize = int( progressChars * (arguments.percent/100) );
-			var barChars = repeatString( '=', progressSize ) & '>' & repeatString( ' ', max( progressChars-progressSize, 0 ) );
+			var barChars = print.onGreen3( repeatString( ' ', progressSize ) & ' ' ) & repeatString( ' ', max( progressChars-progressSize, 0 ) );
 			progressRendered = replace( progressRendered, '=>', barChars );
 	
 			// Replace sizes and speed
-			progressRendered = replace( progressRendered, '^^^^^^^', formatSize( arguments.totalSizeKB, 7 ) );
-			progressRendered = replace( progressRendered, '$$$$$$$', formatSize( arguments.completeSizeKB, 7 ) );
-			progressRendered = replace( progressRendered, '&&&&&&&&', formatSize( min( arguments.speedKBps, 99000), 6 ) & 'ps' );
-			
+			progressRendered = replace( progressRendered, '^^^^^^^', print.deepSkyBlue1( formatSize( arguments.totalSizeKB, 7 ) ) );
+			progressRendered = replace( progressRendered, '$$$$$$$', print.deepSkyBlue1( formatSize( arguments.completeSizeKB, 7 ) ) );
+			progressRendered = replace( progressRendered, '&&&&&&&&', print.orangeRed1( formatSize( min( arguments.speedKBps, 99000), 6 ) & 'ps' ) );
+		
+			lines.append( [
+					attr.fromAnsi( print.Grey66( repeatString( '=', totalWidth ) ) ),
+					attr.fromAnsi( progressRendered ),
+					attr.fromAnsi( print.Grey66( repeatString( '=', totalWidth ) ) )
+				],
+				true
+			);			
 		}
 		
 				
 		// Add to console and flush
-		display.update( [ createObject( 'java', 'org.jline.utils.AttributedString' ).init( progressRendered ) ], 0 );
+		display.update(
+			lines,
+			0
+		);
 
  		// If we're done, add a line break
 		if( arguments.percent == 100 ) {
-			shell.printString( chr( 10 ) );
+			clear();
 		}
 	
 	}
 
+
+	function clear() {
+
+		var terminal = shell.getReader().getTerminal();
+				
+		if( terminal.getWidth() == 0 ) {
+			return;
+		}
+
+		var display = createObject( 'java', 'org.jline.utils.Display' ).init( terminal, false );
+		display.resize( terminal.getHeight(), terminal.getWidth() );
+		
+		var lines = [];
+		if( job.getActive() ) {
+			lines = job.getLines();
+		}
+		
+		lines.append( [
+				attr.init( repeatString( ' ', terminal.getWidth() ) ),
+				attr.init( repeatString( ' ', terminal.getWidth() ) ),
+				attr.init( repeatString( ' ', terminal.getWidth() ) )
+			],
+			true
+		);		
+
+		display.update(
+			lines,
+			0
+		);
+	}
 
 	private function formatSize( sizeKB, numberChars ) {
 		arguments.sizeKB = round( arguments.sizeKB );

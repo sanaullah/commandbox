@@ -25,6 +25,7 @@ component accessors="true" singleton {
 	property name='stringDistance'		inject='provider:StringSimilarity@string-similarity';
 	property name='SystemSettings'		inject='SystemSettings';
 	property name='ConfigService'		inject='ConfigService';
+	property name='metadataCache'		inject='cachebox:metadataCache';
 
 	property name='configured' default="false" type="boolean";
 
@@ -122,9 +123,9 @@ component accessors="true" singleton {
 	/**
 	 * run a command line
 	 * @line.hint line to run
-	 * @captureOutput Temp workaroundn to allow capture of run command
+	 * @captureOutput Temp workaround to allow capture of run command
  	 **/
-	function runCommandline( required string line, captureOutput=false ){
+	function runCommandline( required string line, boolean captureOutput=false ){
 
 		if( left( arguments.line, 4 ) == 'box ' && len( arguments.line ) > 4 ) {
 			consoleLogger.warn( "Removing extra text [box ] from start of command. You don't need that here." );
@@ -141,9 +142,9 @@ component accessors="true" singleton {
 	 * run a command tokens
 	 * @tokens.hint tokens to run
 	 * @piped.hint Data to pipe in to the first command
-	 * @captureOutput Temp workaroundn to allow capture of run command
+	 * @captureOutput Temp workaround to allow capture of run command
  	 **/
-	function runCommandTokens( required array tokens, string piped, captureOutput=false ){
+	function runCommandTokens( required array tokens, string piped, boolean captureOutput=false ){
 
 		// Resolve the command they are wanting to run
 		var commandChain = resolveCommandTokens( tokens );
@@ -160,9 +161,9 @@ component accessors="true" singleton {
 	/**
 	 * run a command
 	 * @commandChain.hint the chain of commands to run
-	 * @captureOutput Temp workaroundn to allow capture of run command
+	 * @captureOutput Temp workaround to allow capture of run command
  	 **/
-	function runCommand( required array commandChain, required string line, string piped, captureOutput=false ){
+	function runCommand( required array commandChain, required string line, string piped, boolean captureOutput=false ){
 
 		// If nothing is returned, something bad happened (like an error instatiating the CFC)
 		if( !commandChain.len() ){
@@ -240,7 +241,7 @@ component accessors="true" singleton {
 			if( previousCommandSeparator == '|' && structKeyExists( local, 'result' ) ){
 				// Clean off trailing any CR to help with piping one-liner outputs as inputs to another command
 				if( result.endsWith( chr( 10 ) ) && len( result ) > 1 ){
-					result = left( result, len( result ) - 1 );
+					local.result = left( result, len( result ) - 1 );
 				}
 				// If we're using named parameters and this command has at least one param defined
 				if( structCount( parameterInfo.namedParameters ) ){
@@ -332,9 +333,7 @@ component accessors="true" singleton {
 			
 			
 			// Run the command
-			try {
-				captureOutput
-				
+			try {				
 				var result = commandInfo.commandReference.CFC.run( argumentCollection = parameterInfo.namedParameters );
 				lastCommandErrored = commandInfo.commandReference.CFC.hasError();
 			} catch( any e ){
@@ -368,7 +367,7 @@ component accessors="true" singleton {
 
 			// If the command didn't return anything, grab its print buffer value
 			if( isNull( result ) ){
-				result = commandInfo.commandReference.CFC.getResult();
+				local.result = commandInfo.commandReference.CFC.getResult();
 			}
 			var interceptData = {
 				commandInfo=commandInfo,
@@ -376,10 +375,11 @@ component accessors="true" singleton {
 				result=result
 			};
 			interceptorService.announceInterception( 'postCommand', interceptData );
-			result = interceptData.result;
+			local.result = interceptData.result;
 
 		} // End loop over command chain
-		return result;
+		
+		return local.result;
 
 	}
 
@@ -877,10 +877,15 @@ component accessors="true" singleton {
 	* @fullCFCPath the full CFC path
 	* @commandName the command name
 	*/
-	private struct function createCommandData( required fullCFCPath, required commandName ){
-		// Get Command MD?
-		var commandMD = getComponentMetadata( arguments.fullCFCPath );
-
+	private struct function createCommandData( required fullCFCPath, required commandName ){	
+		// Get from cache or produce on demand
+		commandMD = metadataCache.getOrSet(
+			fullCFCPath,
+			function() {
+				return getComponentMetadata( fullCFCPath );
+			}
+		);
+		
 		// Set up of command data
 		var commandData = {
 			fullCFCPath 	= arguments.fullCFCPath,

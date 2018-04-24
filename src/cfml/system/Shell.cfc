@@ -10,7 +10,7 @@ component accessors="true" singleton {
 
 	// DI
 	property name="commandService" 			inject="CommandService";
-	property name="completor" 				inject="Completor";
+	property name="CommandCompletor" 		inject="CommandCompletor";
 	property name="REPLCompletor" 			inject="REPLCompletor";	
 	property name="readerFactory" 			inject="ReaderFactory";
 	property name="print" 					inject="print";
@@ -23,8 +23,8 @@ component accessors="true" singleton {
 	property name="InterceptorService"		inject="InterceptorService";
 	property name="ModuleService"			inject="ModuleService";
 	property name="Util"					inject="wirebox.system.core.util.Util";
-	property name="JLineHighlighter"	 	inject="JLineHighlighter";
-	property name="JLineREPLHighlighter"	inject="JLineREPLHighlighter";
+	property name="CommandHighlighter"	 	inject="CommandHighlighter";
+	property name="REPLHighlighter"			inject="REPLHighlighter";
 
 
 	/**
@@ -651,7 +651,7 @@ component accessors="true" singleton {
 	*/
 	function setCompletor( string completorName, any executor ) {
 		if( completorName == 'command' ) {
-			variables.reader.setCompleter( createDynamicProxy( completor, [ 'org.jline.reader.Completer' ] ) );		
+			variables.reader.setCompleter( createDynamicProxy( CommandCompletor, [ 'org.jline.reader.Completer' ] ) );		
 		} else if( completorName == 'repl' ) {
 			
 			REPLCompletor.setCurrentExecutor( arguments.executor ?: '' );
@@ -686,9 +686,9 @@ component accessors="true" singleton {
 	*/
 	function setHighlighter( string highlighterName ) {
 		if( highlighterName == 'command' ) {
-			variables.reader.setHighlighter( createDynamicProxy( JLineHighlighter, [ 'org.jline.reader.Highlighter' ] ) );	
+			variables.reader.setHighlighter( createDynamicProxy( CommandHighlighter, [ 'org.jline.reader.Highlighter' ] ) );	
 		} else if( highlighterName == 'repl' ) {
-			variables.reader.setHighlighter( createDynamicProxy( JLineREPLHighlighter, [ 'org.jline.reader.Highlighter' ] ) );			
+			variables.reader.setHighlighter( createDynamicProxy( REPLHighlighter, [ 'org.jline.reader.Highlighter' ] ) );			
 		} else if( highlighterName == 'dummy' ) {
 			variables.reader.setHighlighter( createObject( 'java', 'org.jline.reader.impl.DefaultHighlighter' ) );
 		} else {
@@ -709,6 +709,8 @@ component accessors="true" singleton {
 		returnOutput=false,
 		string piped,
 		boolean initialCommand=false )  {
+		
+		var job = wirebox.getInstance( 'interactiveJob' );
 
 		// Commands a loaded async in interactive mode, so this is a failsafe to ensure the CommandService
 		// is finished.  Especially useful for commands run onCLIStart.  Wait up to 5 seconds.
@@ -739,6 +741,11 @@ component accessors="true" singleton {
 			if( !initialCommand ) {
 				rethrow;
 			} else {
+				
+				if( job.isActive() ) {
+					job.errorRemaining();
+				}
+				
 				printError( { message : e.message, detail: e.detail } );
 			}
 		// This type of error means the user hit Ctrl-C, during a readLine() call. Duck out and move along.
@@ -747,6 +754,9 @@ component accessors="true" singleton {
 			if( !initialCommand ) {
 				rethrow;
 			} else {
+				if( job.isActive() ) {
+					job.errorRemaining();
+				}
     			variables.reader.getTerminal().writer().flush();
 				variables.reader.getTerminal().writer().println();
 				variables.reader.getTerminal().writer().print( variables.print.boldRedLine( 'CANCELLED' ) );
@@ -759,11 +769,22 @@ component accessors="true" singleton {
 				rethrow;
 			// This type of error means the user hit Ctrl-C, when not in a readLine() call (and hit my custom signal handler).  Duck out and move along.
 			} else if( e.getPageException().getRootCause().getClass().getName() == 'java.lang.InterruptedException' ) {
+				
+				if( job.isActive() ) {
+					job.errorRemaining();
+				}
+				
     			variables.reader.getTerminal().writer().flush();
 				variables.reader.getTerminal().writer().println();
 				variables.reader.getTerminal().writer().print( variables.print.boldRedLine( 'CANCELLED' ) );			
 			// Anything else is completely unexpected and means boom booms happened-- full stack please.
 			} else {
+				
+				if( job.isActive() ) {
+					job.errorRemaining( e.message );
+					variables.reader.getTerminal().writer().println();
+				}
+				
 				printError( e );
 			}
 		}

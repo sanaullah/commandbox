@@ -26,9 +26,8 @@ This file will stay running the entire time the shell is open
 	applicationTimeout = "#createTimeSpan( 999999, 0, 0, 0 )#"
 	mappings="#mappings#">
 
-<cfset new wirebox.system.ioc.Injector( 'commandbox.system.config.WireBox' )>
+<cfset variables.wireBox = new wirebox.system.ioc.Injector( 'commandbox.system.config.WireBox' )>
 
-<cfset variables.wireBox = application.wireBox>
 <cfsetting requesttimeout="86399913600" /><!--- 999999 days --->
 
 <cffunction name="getBanner"> 
@@ -37,10 +36,13 @@ This file will stay running the entire time the shell is open
 	 	
 		var esc = chr( 27 );
 		var caps = createObject( 'java', 'org.jline.utils.InfoCmp$Capability' );
+		// See how many colors this terminal supports
 		var numColors = shell.getReader().getTerminal().getNumericCapability( caps.max_colors );
 	
+		// Windows cmd gets solid blue
 		if( !isNull( numColors ) && numColors < 256 ) {
 			l1 = l2 = l3 = l4 = l5 = '#esc#[38;5;14m';
+		// Terminals with 256 color support get pretty colors
 		} else {
 			l1 = '#esc#[38;5;45m';
 			l2 = '#esc#[38;5;39m';
@@ -92,6 +94,7 @@ This file will stay running the entire time the shell is open
 
 		// Create the shell
 		shell = wireBox.getInstance( name='Shell', initArguments={ asyncLoad=false } );
+		
 		shell.setShellType( 'command' );
 		interceptorService =  shell.getInterceptorService();
 
@@ -156,11 +159,14 @@ This file will stay running the entire time the shell is open
 		// Running the "reload" command will enter this while loop once
 		while( shell.run( silent=silent ) ){
 			clearScreen = shell.getDoClearScreen();
-
+			
 			interceptorService.announceInterception( 'onCLIExit' );
 			if( clearScreen ){
 				shell.clearScreen();
 			}
+			
+			// Wipe out cached metadata on reload.
+			wirebox.getCacheBox().getCache( 'metadataCache' ).clearAll();
 				
 			// Shut down the shell, which includes cleaing up JLine
 			shell.shutdown();
@@ -171,9 +177,7 @@ This file will stay running the entire time the shell is open
 
 			// reload wirebox
 			wireBox.shutdown();
-			new wirebox.system.ioc.Injector( 'commandbox.system.config.WireBox' );
-			variables.wireBox = application.wireBox;
-
+			variables.wireBox = new wirebox.system.ioc.Injector( 'commandbox.system.config.WireBox' );
 
 			// startup a new shell
 			shell = wireBox.getInstance( 'Shell' );
@@ -198,6 +202,13 @@ This file will stay running the entire time the shell is open
 
 	<cfcatch type="any">
 		<cfscript>
+			
+			try {
+				if( isDefined( 'wirebox' ) ) {
+					wirebox.getCacheBox().getCache( 'metadataCache' ).clearAll();
+				}
+			} catch( any e) {
+			}
 			
 			createObject( 'java', 'java.lang.System' ).setProperty( 'cfml.cli.exitCode', '1' );
 	

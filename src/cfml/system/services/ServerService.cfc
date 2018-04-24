@@ -194,6 +194,9 @@ component accessors="true" singleton {
 	function start(
 		Struct serverProps
 	){
+		
+		var job = wirebox.getInstance( 'interactiveJob' );
+		job.start( 'Starting Server', 10 );
 
 		// Resolve path as used locally
 		if( !isNull( serverProps.directory ) ) {
@@ -255,11 +258,9 @@ component accessors="true" singleton {
 
 		// If the server is already running, make sure the user really wants to do this.
 		if( isServerRunning( serverInfo ) && !(serverProps.force ?: false ) ) {
-			consoleLogger.error( '.' );
-			consoleLogger.error( 'Server "#serverInfo.name#" (#serverInfo.webroot#) is already running!' );
-			consoleLogger.error( 'Overwriting a running server means you won''t be able to use the "stop" command to stop the original one.' );
-			consoleLogger.warn( 'Use the --force parameter to skip this check.' );
-			consoleLogger.error( '.' );
+			job.addErrorLog( 'Server "#serverInfo.name#" (#serverInfo.webroot#) is already running!' );
+			job.addErrorLog( 'Overwriting a running server means you won''t be able to use the "stop" command to stop the original one.' );
+			job.addWarnLog( 'Use the --force parameter to skip this check.' );
 			// Ask the user what they want to do
 			var action = wirebox.getInstance( 'multiselect' )
 				.setQuestion( 'What would you like to do? ' )
@@ -272,23 +273,28 @@ component accessors="true" singleton {
 				.ask();
 
 			if( action == 'stop' ) {
-				consoleLogger.error( 'Aborting...' );
+				job.error( 'Aborting...' );
 				return;
 			} else if( action == 'newname' ) {
-				
+				job.clear();
 				// Collect a new name
 				var newName = shell.ask( 'Provide a new unique "name" for this server: ' );
+				job.draw();
 				// If a name is provided, start over.  Otherwise, just keep starting.
 				// The recursive call here will subject their answer to the same check until they provide a name that hasn't been used for this folder.
 				if( len( newName ) ) {
+					job.error( 'Server name [#serverInfo.name#] in use, trying a new one.' );
 					serverProps.name = newName;
-					//copy the orig server's server.json file to the new file so it starts with the same properties as the original. lots of alternative ways to do this but the file copy works and is simple
-					file action='copy' source="#defaultServerConfigFile#" destination=fileSystemUtil.resolvePath( serverProps.directory ?: '' ) & "/server-#serverProps.name#.json" mode ='777';
+					var newServerJSONFile = fileSystemUtil.resolvePath( serverProps.directory ?: '' ) & "/server-#serverProps.name#.json";
+					// copy the orig server's server.json file to the new file so it starts with the same properties as the original. lots of alternative ways to do this but the file copy works and is simple
+					if( fileExists( defaultServerConfigFile ) && newServerJSONFile != defaultServerConfigFile ) {					
+						file action='copy' source="#defaultServerConfigFile#" destination="#newServerJSONFile#" mode ='777';	
+					}
 					return start( serverProps );
 				}
 					
 			} else {
-				consoleLogger.warn( 'Overwriting previous server [#serverInfo.name#].' );
+				job.addWarnLog( 'Overwriting previous server [#serverInfo.name#].' );
 			}
 			
 		}
@@ -510,7 +516,7 @@ component accessors="true" singleton {
 
 		// Double check that the port in the user params or server.json isn't in use
 		if( !isPortAvailable( serverInfo.host, serverInfo.port ) ) {
-			consoleLogger.error( "." );
+			job.addErrorLog( "" );
 			var badPortlocation = 'config';
 			if( serverProps.keyExists( 'port' ) ) {
 				badPortlocation = 'start params';
@@ -519,8 +525,8 @@ component accessors="true" singleton {
 			} else {
 				badPortlocation = 'config server defaults';
 			}
-			consoleLogger.error( "You asked for port [#( serverProps.port ?: serverJSON.web.http.port ?: defaults.web.http.port ?: '?' )#] in your #badPortlocation# but it's already in use so I'm ignoring it and choosing a random one for you." );
-			consoleLogger.error( "." );
+			job.addErrorLog( "You asked for port [#( serverProps.port ?: serverJSON.web.http.port ?: defaults.web.http.port ?: '?' )#] in your #badPortlocation# but it's already in use so I'm ignoring it and choosing a random one for you." );
+			job.addErrorLog( "" );
 			serverInfo.port = getRandomPort( serverInfo.host );
 		}
 
@@ -675,7 +681,7 @@ component accessors="true" singleton {
 				if( directoryExists( thisLibDir ) ) {
 					thisLibDirs.listAppend( thisLibDir );
 				} else if( serverInfo.debug ) {
-					consoleLogger.info( "Ignoring non-existant global lib dir: " & thisLibDir );
+					job.addLog( "Ignoring non-existant global lib dir: " & thisLibDir );
 				}
 				return thisLibDirs;
 			}, '' );
@@ -705,9 +711,9 @@ component accessors="true" singleton {
 		serverInfo.webroot 			= normalizeWebroot( defaultwebroot );
 
 		if( serverInfo.debug ) {
-			consoleLogger.info( "start server in - " & serverInfo.webroot );
-			consoleLogger.info( "server name - " & serverInfo.name );
-			consoleLogger.info( "server config file - " & defaultServerConfigFile );
+			job.addLog( "start server in - " & serverInfo.webroot );
+			job.addLog( "server name - " & serverInfo.name );
+			job.addLog( "server config file - " & defaultServerConfigFile );
 		}
 
 		if( !len( serverInfo.WARPath ) && !len( serverInfo.cfengine ) ) {
@@ -768,12 +774,6 @@ component accessors="true" singleton {
 			if( serverInfo.cfengine contains "railo" ) {
 				javaagent = '-javaagent:#serverInfo.serverHomeDirectory#/WEB-INF/lib/railo-inst.jar';
 			}
-			
-			// If starting Adobe server with SSL
-			if( serverInfo.cfengine contains "adobe" && serverInfo.SSLEnable ) {
-				// https://ortussolutions.atlassian.net/browse/COMMANDBOX-725
-				serverInfo.JVMargs &= ' -Dcom.sun.net.ssl.enableECC=false';
-			}
 
 			// Add in "/cf_scripts" alias for 2016+ servers if the /cf_scripts folder exists in the war we're starting and there isn't already an alias
 			// for this.  I'm specifically not checking the engine name and version so this will work on regular Adobe wars and be future proof.
@@ -795,7 +795,7 @@ component accessors="true" singleton {
 
 				// Expand the war if it doesn't exist or we're forcing
 				if( !directoryExists( serverInfo.serverHomeDirectory ) || ( serverProps.force ?: false ) ) {
-					consoleLogger.info( "Exploding WAR archive...");
+					job.addLog( "Exploding WAR archive...");
 					directoryCreate( serverInfo.serverHomeDirectory, true, true );
 					zip action="unzip" file="#serverInfo.WARPath#" destination="#serverInfo.serverHomeDirectory#" overwrite="true";
 				}
@@ -831,8 +831,10 @@ component accessors="true" singleton {
 					serverInfo.trayIcon = '/commandbox/system/config/server-icons/trayicon-cf11#iconSize#.png';
 				} else if( listFirst( serverInfo.engineVersion, '.' ) == 2016 ) {
 					serverInfo.trayIcon = '/commandbox/system/config/server-icons/trayicon-cf2016#iconSize#.png';
+				} else if( listFirst( serverInfo.engineVersion, '.' ) == 2018 ) {
+					serverInfo.trayIcon = '/commandbox/system/config/server-icons/trayicon-cf2018#iconSize#.png';
 				} else {
-					serverInfo.trayIcon = '/commandbox/system/config/server-icons/trayicon-cf2016#iconSize#.png';
+					serverInfo.trayIcon = '/commandbox/system/config/server-icons/trayicon-cf2018#iconSize#.png';
 				}
 
 			}
@@ -926,7 +928,7 @@ component accessors="true" singleton {
 
 		if( val( serverInfo.minHeapSize ) ) {
 			if( serverInfo.minHeapSize > serverInfo.heapSize ) {
-				consoleLogger.warn( 'Your JVM min heap size [#serverInfo.minHeapSize#] is set larger than your max size [#serverInfo.heapSize#]! Reducing the Min to prevent errors.' );
+				job.addWarnLog( 'Your JVM min heap size [#serverInfo.minHeapSize#] is set larger than your max size [#serverInfo.heapSize#]! Reducing the Min to prevent errors.' );
 			}
 			argTokens.append( '-Xms#min( serverInfo.minHeapSize, serverInfo.heapSize )#m' );
 		}
@@ -1013,7 +1015,7 @@ component accessors="true" singleton {
 
 		// Starting a WAR
 		if (serverInfo.WARPath != "" ) {
-			args.append( serverInfo.WARPath );
+			args.append( serverInfo.serverHomeDirectory );
 		// Stand alone server
 		} else {
 			args.append( serverInfo.webroot );
@@ -1098,9 +1100,7 @@ component accessors="true" singleton {
 
 		if( serverInfo.rewritesEnable ){
 			if( !fileExists(serverInfo.rewritesConfig) ){
-				consoleLogger.error( '.' );
-				consoleLogger.error( 'URL rewrite config not found [#serverInfo.rewritesConfig#]' );
-				consoleLogger.error( '.' );
+				job.error( 'URL rewrite config not found [#serverInfo.rewritesConfig#]' );
 				return;
 			}
 			args.append( '--urlrewrite-file' ).append( serverInfo.rewritesConfig );
@@ -1112,7 +1112,7 @@ component accessors="true" singleton {
 
 	    if( serverInfo.debug ) {
 			var cleanedArgs = cr & '    ' & trim( reReplaceNoCase( args.toList( ' ' ), ' (-|"-)', cr & '    \1', 'all' ) );
-			consoleLogger.debug("Server start command: #serverInfo.javaHome# #cleanedargs#");
+			job.addLog("Server start command: #serverInfo.javaHome# #cleanedargs#");
 	    }
 
 	    // needs to be unique in each run to avoid errors
@@ -1142,8 +1142,11 @@ component accessors="true" singleton {
 	    variables.process = processBuilder.start();
 
 		// She'll be coming 'round the mountain when she comes...
-		consoleLogger.warn( "The server for #serverInfo.webroot# is starting on #serverInfo.openbrowserURL# ..." );
-
+		job.addWarnLog( "The server for #serverInfo.webroot# is starting on #serverInfo.openbrowserURL# ..." );
+	    
+	    job.complete( serverInfo.debug );
+	    consoleLogger.debug( '.' );
+	    
 		// If the user is running a one-off command to start a server or specified the debug flag, stream the output and wait until it's finished starting.
 		var interactiveStart = ( shell.getShellType() == 'command' || serverInfo.debug || !background );
 
@@ -1170,23 +1173,18 @@ component accessors="true" singleton {
 				while( !isNull( line ) ){
 
 					// output it if we're being interactive
-					if( attributes.interactiveStart ) {					
-						
-						// Debug non-console starts have nested log output
-						// Ex:
-						// [INFO ] runwar.server: processoutput: [INFO ] runwar.context: Apr 11, 2018 15:57:32 PM Information [main] - Event Gateway Disabled.
-						line = reReplaceNoCase( line, '^\[[^]]*] runwar\.server: processoutput: ', '' );
+					if( attributes.interactiveStart ) {
 						
 						// Log messages from the CF engine or app code writing direclty to std/err out strip off "runwar.context" but leave color coded severity
 						// Ex:
 						// [INFO ] runwar.context: 04/11 15:47:10 INFO Starting Flex 1.5 CF Edition
-						line = reReplaceNoCase( line, '^(\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
+						line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
 						
 						// Log messages from runwar itself, simplify the logging category to just "Runwar:" and leave color coded severity
 						// Ex:
 						// [DEBUG] runwar.config: Enabling Proxy Peer Address handling
 						// [DEBUG] runwar.server: Starting open browser action
-						line = reReplaceNoCase( line, '^(\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
+						line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
 	
 						// Log messages from any other 3rd party java lib tapping into Log4j will be left alone
 						// Ex:
@@ -1295,6 +1293,8 @@ component accessors="true" singleton {
 	function resolveServerDetails(
 		required struct serverProps
 	) {
+		
+		var job = wirebox.getInstance( 'interactiveJob' );
 		var locDebug = serverProps.debug ?: false;
 
 		// As a convenient shorcut, allow the serverConfigFile to be passed via the name parameter.
@@ -1320,22 +1320,22 @@ component accessors="true" singleton {
 
 		// Get server descriptor from default location.
 		// If starting by name and we guessed the server.json file name, this serverJSON maybe replaced later by another saved file.
-	    if( locDebug ) { consoleLogger.debug("Looking for server JSON file by convention: #defaultServerConfigFile#"); }
+	    if( locDebug ) { job.addLog("Looking for server JSON file by convention: #defaultServerConfigFile#"); }
 		var serverJSON = readServerJSON( defaultServerConfigFile );
 
 		// Get the web root out of the server.json, if specified and make it relative to the actual server.json file.
 		// If user gave us a webroot, we use it first.
 		if( len( arguments.serverProps.directory ?: '' ) ) {
 			var defaultwebroot = arguments.serverProps.directory;
-		    if( locDebug ) { consoleLogger.debug("webroot specified by user: #defaultwebroot#"); }
+		    if( locDebug ) { job.addLog("webroot specified by user: #defaultwebroot#"); }
 		// Get the web root out of the server.json, if specified and make it relative to the actual server.json file.
 		} else if( len( serverJSON.web.webroot ?: '' ) ) {
 			var defaultwebroot = fileSystemUtil.resolvePath( serverJSON.web.webroot, getDirectoryFromPath( defaultServerConfigFile ) );
-		    if( locDebug ) { consoleLogger.debug("webroot pulled from server's JSON: #defaultwebroot#"); }
+		    if( locDebug ) { job.addLog("webroot pulled from server's JSON: #defaultwebroot#"); }
 		// Otherwise default to the directory the server's JSON file lives in (which defaults to the CWD)
 		} else {
 			var defaultwebroot = fileSystemUtil.resolvePath( getDirectoryFromPath( defaultServerConfigFile ) );
-		    if( locDebug ) { consoleLogger.debug("webroot defaulted to location of server's JSON file: #defaultwebroot#"); }
+		    if( locDebug ) { job.addLog("webroot defaulted to location of server's JSON file: #defaultwebroot#"); }
 		}
 
 		// If user types a name, use that above all else
@@ -1388,27 +1388,28 @@ component accessors="true" singleton {
 		// config, let's re-read out that config JSON file to use instead of the default above.
 		if( !len( serverProps.serverConfigFile ?: '' )
 			&& len( serverInfo.serverConfigFile ?: '' )
-			&& serverInfo.serverConfigFile != defaultServerConfigFile ) {
+			&& serverInfo.serverConfigFile != defaultServerConfigFile
+			&& fileExists( serverInfo.serverConfigFile ) ) {
 
 			// Get server descriptor again
-		    if( locDebug ) { consoleLogger.debug("Switching to the last-used server JSON file for this server: #serverInfo.serverConfigFile#"); }
+		    if( locDebug ) { job.addLog("Switching to the last-used server JSON file for this server: #serverInfo.serverConfigFile#"); }
 			serverJSON = readServerJSON( serverInfo.serverConfigFile );
 			defaultServerConfigFile = serverInfo.serverConfigFile;
 
 			// Now that we changed server JSONs, we need to recalculate the webroot.
-		    if( locDebug ) { consoleLogger.debug("Recalculating web root based on new server JSON file."); }
+		    if( locDebug ) { job.addLog("Recalculating web root based on new server JSON file."); }
 			// If user gave us a webroot, we use it first.
 			if( len( arguments.serverProps.directory ?: '' ) ) {
 				var defaultwebroot = arguments.serverProps.directory;
-			    if( locDebug ) { consoleLogger.debug("webroot specified by user: #defaultwebroot#"); }
+			    if( locDebug ) { job.addLog("webroot specified by user: #defaultwebroot#"); }
 			// Get the web root out of the server.json, if specified and make it relative to the actual server.json file.
 			} else if( len( serverJSON.web.webroot ?: '' ) ) {
 				var defaultwebroot = fileSystemUtil.resolvePath( serverJSON.web.webroot, getDirectoryFromPath( serverInfo.serverConfigFile ) );
-			    if( locDebug ) { consoleLogger.debug("webroot pulled from server's JSON: #defaultwebroot#"); }
+			    if( locDebug ) { job.addLog("webroot pulled from server's JSON: #defaultwebroot#"); }
 			// Otherwise default to the directory the server's JSON file lives in (which defaults to the CWD)
 			} else {
 				var defaultwebroot = fileSystemUtil.resolvePath( getDirectoryFromPath( serverInfo.serverConfigFile ) );
-			    if( locDebug ) { consoleLogger.debug("webroot defaulted to location of server's JSON file: #defaultwebroot#"); }
+			    if( locDebug ) { job.addLog("webroot defaulted to location of server's JSON file: #defaultwebroot#"); }
 			}
 
 		}
