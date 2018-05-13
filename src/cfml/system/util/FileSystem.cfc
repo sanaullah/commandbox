@@ -23,6 +23,14 @@ component accessors="true" singleton {
 	function init() {
 		variables.os = createObject( "java", "java.lang.System" ).getProperty( "os.name" ).toLowerCase();
 		variables.userHome = createObject( 'java', 'java.lang.System' ).getProperty( 'user.home' );
+		
+        variables.Channels = createObject( "java", "java.nio.channels.Channels" );
+        variables.StandardOpenOption = createObject( "java", "java.nio.file.StandardOpenOption" );
+        variables.FileChannel = createObject( "java", "java.nio.channels.FileChannel" );
+        variables.ByteBuffer = createObject( "java", "java.nio.ByteBuffer" );
+        variables.CharBuffer = createObject( "java", "java.nio.CharBuffer" );
+        variables.String = createObject( "java", "java.lang.String" );
+		
 		return this;
 	}
 
@@ -40,7 +48,7 @@ component accessors="true" singleton {
 		// The Java class will strip trailing slashses, but these are meaningful in globbing patterns
 		var trailingSlash = ( path.len() > 1 && ( path.endsWith( '/' ) || path.endsWith( '\' ) ) );
 		// java will remove trailing periods when canonicalizing a path.  I'm not sure that's correct.
-		var trailingPeriod = ( path.len() > 1 && path.endsWith( '.' ) );
+		var trailingPeriod = ( path.len() > 1 && path.endsWith( '.' ) && !path.endsWith( '..' ) );
 		
 		// Load our path into a Java file object so we can use some of its nice utility methods
 		var oPath = createObject( 'java', 'java.io.File' ).init( path );
@@ -267,6 +275,8 @@ component accessors="true" singleton {
     	// If one of the folders has a period, we've got to do something special.
     	// C:/users/brad.development/foo.cfc turns into /C__users_brad_development/foo.cfc
     	if( getDirectoryFromPath( arguments.absolutePath ) contains '.' ) {
+			var leadingSlash = arguments.absolutePath.startsWith( '/' );
+			var UNC = arguments.absolutePath.startsWith( '\\' );
     		var mappingPath = getDirectoryFromPath( arguments.absolutePath );
     		mappingPath = mappingPath.replace( '\', '/', 'all' );
     		mappingPath = mappingPath.listChangeDelims( '/', '/' );
@@ -276,12 +286,23 @@ component accessors="true" singleton {
     		mappingName = mappingName.replace( '/', '_', 'all' );
     		mappingName = '/' & mappingName;
 
-    		createMapping( mappingName, mappingPath );
-    		return mappingName & '/' & getFileFromPath( arguments.absolutePath );
+			// *nix needs this
+			if( leadingSlash ) {
+				mappingPath = '/' & mappingPath;
+			}
+
+			// UNC network paths
+			if( UNC ) {	
+				var mapping = locateUNCMapping( mappingPath );
+				return mapping & '/' & getFileFromPath( arguments.absolutePath );
+			} else {
+				createMapping( mappingName, mappingPath );
+				return mappingName & '/' & getFileFromPath( arguments.absolutePath );
+			}
 		}
     	
     	// *nix needs to include first folder due to Lucee bug.
-    	// So /usr/brad/foo.cfc because /usr
+    	// So /usr/brad/foo.cfc becomes /usr
     	if( !isWindows() ) {
 	    	var firstFolder = listFirst( arguments.absolutePath, '/' );
 	    	var path = listRest( arguments.absolutePath, '/' );
@@ -341,7 +362,7 @@ component accessors="true" singleton {
     * Creates the mapping if it doesn't exist
     */
     string function locateUNCMapping( required string UNCShare  ) {
-    	var mappingName = '/' & arguments.UNCShare.replace( '/', '_' ) & '_UNC';
+    	var mappingName = '/' & arguments.UNCShare.replace( '/', '_' ).replace( '.', '_', 'all' ) & '_UNC';
     	var mappingPath = '\\' & arguments.UNCShare & '/';
     	createMapping( mappingName, mappingPath );
    		return mappingName;
@@ -438,6 +459,77 @@ component accessors="true" singleton {
 			coreClassLoader = createObject( 'java', 'cliloader.LoaderCLIMain' ).getClassLoader();
 		}
 		return coreClassLoader;		
+	}
+	
+	/*
+	* Read a file while locking the file system
+	*/
+	function lockingFileRead( required string path ) {
+		// CFLock to prevent two threads on the same JVM from trying to lock the same file. 
+		// That will throw an overlappinglock exception since the file lock is JVM-wide
+		lock name=path type="exclusive" {
+			try {
+		        var file = createObject( "java", "java.io.File" ).init( path );		
+				var fch=FileChannel.open( file.toPath(), [ StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.READ ] );
+		
+		        // This method blocks until it can retrieve the lock.
+		        var fileLock = fch.lock();
+		
+				// Use a reader to collect the characters into a string builder
+				var sb = createObject( "java", "java.lang.StringBuilder" ).init();
+				var reader = Channels.newReader( fch, 'UTF-8' );
+				var cb = CharBuffer.allocate( 8192 );
+				while( ( var size = reader.read( cb ) ) != -1 ) {
+					cb.flip();
+					sb.append( cb );
+					cb.clear();
+				}
+		        
+		    // This stuff always gotta' run.
+			} finally {
+		        if( !isNull( fileLock ) && fileLock.isValid() ) {
+		            fileLock.release();
+		        }
+		
+		        if( !isNull( fch ) ) {
+		        	fch.close();
+		        }			
+			}	
+		}
+		return sb.toString();
+		
+	}
+	
+	/*
+	* write a file while locking the file system
+	*/
+	function lockingFileWrite( required string path, required string contents ) {
+		// CFLock to prevent two threads on the same JVM from trying to lock the same file. 
+		// That will throw an overlappinglock exception since the file lock is JVM-wide
+		lock name=path type="exclusive" {
+			try {
+				
+		        var file = createObject( "java", "java.io.File" ).init( path );		
+				var fch=FileChannel.open( file.toPath(), [ StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.READ ] );
+		
+		        // This method blocks until it can retrieve the lock.
+		        var fileLock = fch.lock();
+		
+		        fch.write( ByteBuffer.wrap( contents.getBytes() ) );
+		        // Trim off any excess
+		        fch.truncate( fch.position() );
+		        
+		    // This stuff always gotta' run.
+			} finally {
+		        if( !isNull( fileLock ) && fileLock.isValid() ) {
+		            fileLock.release();
+		        }
+		
+		        if( !isNull( fch ) ) {
+		        	fch.close();
+		        }			
+			}	
+		}
 	}
 
 }
