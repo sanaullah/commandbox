@@ -23,6 +23,8 @@ component aliases="about" {
 		var commandboxHome = expandpath( '/commandbox-home' );
 		var binaryPath = getSystemSetting( 'java.class.path', 'Unkonwn' );
 		var userName = getSystemSetting( 'user.name', 'Unkonwn' );
+		var javaBinary = fileSystemUtil.getJREExecutable();
+		var JLineTerminal = shell.getReader().getTerminal().getClass().getName();
 
 		print.line();
 		print.greenLine( '****************************************************************************************************' );
@@ -32,14 +34,16 @@ component aliases="about" {
 		print.greenLine( '****************************************************************************************************' );
 		print.greenLine( '*                                                                                                  *' );
 		print.greenLine( '*                                                                                                  *' );
-		print.green( '*' ); print.cyan( '  CommandBox Version: ' ); print.white( '#shellVersion##repeatString( ' ', max( 0, width - 24 - len( shellVersion ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  CFML Engine:        ' ); print.white( '#CFMLEngine##repeatString( ' ', max( 0, width - 24 - len( CFMLEngine ) ) )#' );		print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  CFML Version:       ' ); print.white( '#CFMLVersion##repeatString( ' ', max( 0, width - 24 - len( CFMLVersion ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  Java Version:       ' ); print.white( '#javaVersion##repeatString( ' ', max( 0, width - 24 - len( javaVersion ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  CommandBox Home     ' ); print.white( '#commandboxHome##repeatString( ' ', max( 0, width - 24 - len( commandboxHome ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  Binary              ' ); print.white( '#binaryPath##repeatString( ' ', max( 0, width - 24 - len( binaryPath ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  Username            ' ); print.white( '#userName##repeatString( ' ', max( 0, width - 24 - len( userName ) ) )#' );	print.greenLine( '*' );
-		print.green( '*' ); print.cyan( '  Authors:            ' ); print.white( 'Brad Wood, Luis Majano, Denny Valiant                                       ' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CommandBox Version: ' ); print.text( '#shellVersion##repeatString( ' ', max( 0, width - 24 - len( shellVersion ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CommandBox Authors: ' ); print.text( 'Brad Wood, Luis Majano, Denny Valiant                                       ' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CommandBox Binary   ' ); print.text( '#binaryPath##repeatString( ' ', max( 0, width - 24 - len( binaryPath ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CommandBox Home     ' ); print.text( '#commandboxHome##repeatString( ' ', max( 0, width - 24 - len( commandboxHome ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CFML Engine:        ' ); print.text( '#CFMLEngine##repeatString( ' ', max( 0, width - 24 - len( CFMLEngine ) ) )#' );		print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  CFML Version:       ' ); print.text( '#CFMLVersion##repeatString( ' ', max( 0, width - 24 - len( CFMLVersion ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  Java Version:       ' ); print.text( '#javaVersion##repeatString( ' ', max( 0, width - 24 - len( javaVersion ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  Java Path:          ' ); print.text( '#javaBinary##repeatString( ' ', max( 0, width - 24 - len( javaBinary ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  OS Username         ' ); print.text( '#userName##repeatString( ' ', max( 0, width - 24 - len( userName ) ) )#' );	print.greenLine( '*' );
+		print.green( '*' ); print.cyan( '  JLine Terminal      ' ); print.text( '#JLineTerminal##repeatString( ' ', max( 0, width - 24 - len( JLineTerminal ) ) )#' );	print.greenLine( '*' );
 		print.greenLine( '*                                                                                                  *' );
 		print.greenLine( '*                                                                                                  *' );
 		print.greenLine( '****************************************************************************************************' );

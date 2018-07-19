@@ -1110,11 +1110,6 @@ component accessors="true" singleton {
 		serverInfo.status = "starting";
 		setServerInfo( serverInfo );
 
-	    if( serverInfo.debug ) {
-			var cleanedArgs = cr & '    ' & trim( reReplaceNoCase( args.toList( ' ' ), ' (-|"-)', cr & '    \1', 'all' ) );
-			job.addLog("Server start command: #serverInfo.javaHome# #cleanedargs#");
-	    }
-
 	    // needs to be unique in each run to avoid errors
 		var threadName = 'server#hash( serverInfo.webroot )##createUUID()#';
 		// Construct a new process object
@@ -1133,6 +1128,11 @@ component accessors="true" singleton {
 	    	args.prepend( expandPath( '/server-commands/bin/server_spawner.sh' ) );
 	    	// Pass script directly to bash so I don't have to worry about it being executable
 			args.prepend( expandPath( '/bin/bash' ) );
+	    }
+
+	    if( serverInfo.debug ) {
+			var cleanedArgs = cr & '    ' & trim( reReplaceNoCase( args.toList( ' ' ), ' (-|"-)', cr & '    \1', 'all' ) );
+			job.addLog("Server start command: #cleanedargs#");
 	    }
 	    
 	    processBuilder.init( args );
@@ -1171,28 +1171,30 @@ component accessors="true" singleton {
 
 				var line = bufferedReader.readLine();
 				while( !isNull( line ) ){
+						
+					// Log messages from the CF engine or app code writing direclty to std/err out strip off "runwar.context" but leave color coded severity
+					// Ex:
+					// [INFO ] runwar.context: 04/11 15:47:10 INFO Starting Flex 1.5 CF Edition
+					line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
+					
+					// Log messages from runwar itself, simplify the logging category to just "Runwar:" and leave color coded severity
+					// Ex:
+					// [DEBUG] runwar.config: Enabling Proxy Peer Address handling
+					// [DEBUG] runwar.server: Starting open browser action
+					line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
+
+					// Log messages from any other 3rd party java lib tapping into Log4j will be left alone
+					// Ex:
+					// [DEBUG] org.tuckey.web.filters.urlrewrite.RuleExecutionOutput: needs to be forwarded to /index.cfm/Main
+
+					// Build up our output.  Limit the size of this so a console server running for a month doesn't fill up memory.
+					// We only use this for the server info result anyway.
+					if( startOutput.length() < 1000 ) {
+						startOutput.append( line & chr( 13 ) & chr( 10 ) );
+					}
 
 					// output it if we're being interactive
 					if( attributes.interactiveStart ) {
-						
-						// Log messages from the CF engine or app code writing direclty to std/err out strip off "runwar.context" but leave color coded severity
-						// Ex:
-						// [INFO ] runwar.context: 04/11 15:47:10 INFO Starting Flex 1.5 CF Edition
-						line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
-						
-						// Log messages from runwar itself, simplify the logging category to just "Runwar:" and leave color coded severity
-						// Ex:
-						// [DEBUG] runwar.config: Enabling Proxy Peer Address handling
-						// [DEBUG] runwar.server: Starting open browser action
-						line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
-	
-						// Log messages from any other 3rd party java lib tapping into Log4j will be left alone
-						// Ex:
-						// [DEBUG] org.tuckey.web.filters.urlrewrite.RuleExecutionOutput: needs to be forwarded to /index.cfm/Main
-	
-						// Build up our output
-						startOutput.append( line & chr( 13 ) & chr( 10 ) );
-
 						print
 							.line( line )
 							.toConsole();
@@ -1218,7 +1220,7 @@ component accessors="true" singleton {
 				if( isDefined( 'bufferedReader' ) ) {
 					bufferedReader.close();
 				}
-				serverInfo.statusInfo.result = startOutput.toString();
+				serverInfo.statusInfo.result = print.unansi( startOutput.toString() );
 				setServerInfo( serverInfo );
 				// If the "start" command is on the line watching our console output
 				if( variables.waitingOnConsoleStart ) {
@@ -1321,7 +1323,8 @@ component accessors="true" singleton {
 		// Get server descriptor from default location.
 		// If starting by name and we guessed the server.json file name, this serverJSON maybe replaced later by another saved file.
 	    if( locDebug ) { consoleLogger.debug("Looking for server JSON file by convention: #defaultServerConfigFile#"); }
-		var serverJSON = readServerJSON( defaultServerConfigFile );
+		var serverJSON_rawSystemSettings = readServerJSON( defaultServerConfigFile );
+		var serverJSON = systemSettings.expandDeepSystemSettings( serverJSON_rawSystemSettings );
 
 		// Get the web root out of the server.json, if specified and make it relative to the actual server.json file.
 		// If user gave us a webroot, we use it first.
@@ -1393,7 +1396,8 @@ component accessors="true" singleton {
 
 			// Get server descriptor again
 		    if( locDebug ) { consoleLogger.debug("Switching to the last-used server JSON file for this server: #serverInfo.serverConfigFile#"); }
-			serverJSON = readServerJSON( serverInfo.serverConfigFile );
+			var serverJSON_rawSystemSettings = readServerJSON( serverInfo.serverConfigFile );
+			var serverJSON = systemSettings.expandDeepSystemSettings( serverJSON_rawSystemSettings );			
 			defaultServerConfigFile = serverInfo.serverConfigFile;
 
 			// Now that we changed server JSONs, we need to recalculate the webroot.
@@ -1416,12 +1420,12 @@ component accessors="true" singleton {
 
 		// By now we've figured out the name, webroot, and serverConfigFile for this server.
 		// Also return the serverInfo of the last values the server was started with (if ever)
-		// and the serverJSON setting for the server, if they exist.
+		// and the serverJSON setting for the server, if they exist.		
 		return {
 			defaultName : defaultName,
 			defaultwebroot : defaultwebroot,
 			defaultServerConfigFile : defaultServerConfigFile,
-			serverJSON : serverJSON,
+			serverJSON : serverJSON_rawSystemSettings,
 			serverInfo : serverInfo,
 			serverIsNew : serverIsNew
 		};
@@ -1545,7 +1549,7 @@ component accessors="true" singleton {
 			return true;
 		} catch( java.net.BindException var e ) {
 			// Same as above-- the IP address/host isn't bound to any local adapters.  Probably a host file entry went missing.
-			if( e.message contains 'Cannot assign requested address' ) {
+			if( e.message contains 'Cannot assign requested address' || e.message contains 'Can''t assign requested address' ) {
 				return true;
 			}
 			// We're assuming that any other error means the address was in use.
