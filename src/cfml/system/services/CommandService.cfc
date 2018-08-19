@@ -314,10 +314,6 @@ component accessors="true" singleton {
 
 			interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
 
-			// Successful command execution resets exit code to 0.  Set this prior to running the command since the command
-			// may explicitly set the exit code to 1 but not call the error() method.
-			shell.setExitCode( 0 );
-
 			// Tells us if we are going to capture the output of this command and pass it to another
 			// Used for our workaround to switch if the "run" command pipes to the terminal or not
 			// If there are more commands in the chain and we are going to pipe or redirect to them
@@ -338,6 +334,11 @@ component accessors="true" singleton {
 				lastCommandErrored = commandInfo.commandReference.CFC.hasError();
 			} catch( any e ){
 				lastCommandErrored = true;
+				// If this command didn't already set a failing exit code...
+				if( commandInfo.commandReference.CFC.getExitCode() == 0 ) {
+					// Go ahead and set one for it.  The shell will inherit it below in the finally block.
+					commandInfo.commandReference.CFC.setExitCode( 1 );
+				}
 
 				// Dump out anything the command had printed so far
 				var result = commandInfo.commandReference.CFC.getResult();
@@ -363,6 +364,8 @@ component accessors="true" singleton {
 			} finally {
 				// Remove it from the stack
 				instance.callStack.deleteAt( 1 );
+				// Set command exit code into the shell
+				shell.setExitCode( commandInfo.commandReference.CFC.getExitCode() );
 			}
 
 			// If the command didn't return anything, grab its print buffer value
