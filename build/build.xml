@@ -16,8 +16,8 @@ External Dependencies:
  	<property name="distro.groupID"				value="ortussolutions" />
  	<property name="distro.name"				value="commandbox"/>
  	<!-- Special things happen when the version and stableVersion are the same value as that signifies a "stable" build.   -->
- 	<property name="commandbox.version"			value="4.4.0-alpha"/>
- 	<property name="commandbox.stableVersion"	value="4.3.0"/>
+ 	<property name="commandbox.version"			value="4.5.0-alpha"/>
+ 	<property name="commandbox.stableVersion"	value="4.4.0"/>
 
     <!-- Time Label -->
 	<tstamp prefix="start"/>
@@ -741,7 +741,7 @@ External Dependencies:
 					chdir="%OLDPWD%"
 					icon="${src.dir}/resources/box.ico"
 					stayAlive="true">
-					<jre path="./jre/" minVersion="1.8.0" maxVersion="1.8.0_999" />
+					<jre path="./jre/" minVersion="1.8.0" />
 					<versionInfo fileVersion="${commandbox.version.noPrereleaseID}.0"
 								 txtFileVersion="${commandbox.version}.${build.number}"
 								 fileDescription="${commandbox.description}"

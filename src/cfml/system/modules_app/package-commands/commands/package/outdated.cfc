@@ -61,13 +61,14 @@ component aliases="outdated" {
 
 		// JSON output
 		if( arguments.JSON ) {
-			print.line( formatterUtil.formatJson( aOutdatedDependencies ) );
+			print.line( aOutdatedDependencies );
 			return;
 		}
 
 		// normal output
 		if( aOutdatedDependencies.len() gt 0 ){
-			print.green( 'Found ' )
+			print.line()
+				.green( 'Found ' )
 				.boldGreen( '(#aOutdatedDependencies.len()#)' )
 				.green( ' Outdated Dependenc#( aOutdatedDependencies.len()  == 1 ? 'y' : 'ies' )# ' )
 				.line();
@@ -77,7 +78,7 @@ component aliases="outdated" {
 				.cyanLine( "Run the 'update' command to update all the outdated dependencies to their latest version." )
 				.cyanLine( "Or use 'update {slug}' to update a specific dependency" );
 		} else {
-			print.boldYellowLine( 'There are no outdated dependencies!' );
+			print.blueLine( 'There are no outdated dependencies!' );
 		}
 
 	}

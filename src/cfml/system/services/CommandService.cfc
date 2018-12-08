@@ -266,6 +266,23 @@ component accessors="true" singleton {
 				structDelete( local, 'result', false );
 			}
 
+
+			// Reset the printBuffer
+			commandInfo.commandReference.CFC.reset();
+
+			// If there are currently executing commands, flush out the print buffer from the last one
+			// This will prevent the output from showing up out of order if one command nests a call to another.
+			if( instance.callStack.len() ){
+				// Print anything in the buffer
+				shell.printString( instance.callStack[1].commandInfo.commandReference.CFC.getResult() );
+				// And reset it now that it's been printed.
+				// This command can add more to the buffer once it's executing again.
+				instance.callStack[1].commandInfo.commandReference.CFC.reset();
+			}
+
+			// Add command to the top of the stack
+			instance.callStack.prepend( { commandInfo : commandInfo, environment : {} } );
+			
 			// If we're using postitional params, convert them to named
 			if( arrayLen( parameterInfo.positionalParameters ) ){
 				parameterInfo.namedParameters = convertToNamedParameters( parameterInfo.positionalParameters, commandParams );
@@ -285,6 +302,8 @@ component accessors="true" singleton {
 			// Make sure we have all required params.
 			parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
 
+			interceptorService.announceInterception( 'preCommandParamProcess', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
+
 			// Evaluate parameter expressions and system settings
 			evaluateExpressions( parameterInfo );
 			evaluateSystemSettings( parameterInfo );
@@ -295,22 +314,6 @@ component accessors="true" singleton {
 
 			// Ensure supplied params match the correct type
 			validateParams( parameterInfo.namedParameters, commandParams );
-
-			// Reset the printBuffer
-			commandInfo.commandReference.CFC.reset();
-
-			// If there are currently executing commands, flush out the print buffer from the last one
-			// This will prevent the output from showing up out of order if one command nests a call to another.
-			if( instance.callStack.len() ){
-				// Print anything in the buffer
-				shell.printString( instance.callStack[1].commandReference.CFC.getResult() );
-				// And reset it now that it's been printed.
-				// This command can add more to the buffer once it's executing again.
-				instance.callStack[1].commandReference.CFC.reset();
-			}
-
-			// Add command to the top of the stack
-			instance.callStack.prepend( commandInfo );
 
 			interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
 
@@ -803,7 +806,7 @@ component accessors="true" singleton {
 		if( len( command ) ){
 			for( var call in instance.callStack ){
 				// CommandString is a dot-delimted path
-				if( call.commandString == listChangeDelims( command, ' ', '.' ) ){
+				if( call.commandInfo.commandString == listChangeDelims( command, ' ', '.' ) ){
 					return true;
 				}
 			}
@@ -1054,7 +1057,7 @@ component accessors="true" singleton {
 	/**
 	 * Match positional parameters up with their names
  	 **/
-	private function convertToNamedParameters( userPositionalParams, commandParams ){
+	function convertToNamedParameters( userPositionalParams, commandParams ){
 		var results = {};
 
 		var i = 0;
@@ -1098,6 +1101,15 @@ component accessors="true" singleton {
 			}
 		} );
 
+	}
+	
+
+	/**
+	 * Get the array of commands being executed.
+	 * This may be empty.
+ 	 **/
+	array function getCallStack() {
+		return instance.callStack;
 	}
 
 }
