@@ -131,7 +131,7 @@ component accessors="true" singleton {
 			consoleLogger.warn( "Removing extra text [box ] from start of command. You don't need that here." );
 			arguments.line = right( arguments.line, len( arguments.line ) - 4 );
 		}
-
+				
 		// Resolve the command they are wanting to run
 		var commandChain = resolveCommand( line );
 
@@ -230,7 +230,8 @@ component accessors="true" singleton {
 			// Parameters need to be ALL positional or ALL named
 			if( arrayLen( parameterInfo.positionalParameters ) && structCount( parameterInfo.namedParameters ) ){
 				shell.setExitCode( 1 );
-				throw( message='Please don''t mix named and positional parameters, it makes me dizzy.', detail=line, type="commandException");
+				var detail = "You specified named parameters: #structKeyList(parameterInfo.namedParameters)# but you did not specify a name for: #parameterInfo.positionalParameters[1]# #chr(10)##chr(9)#" & line; 
+				throw( message='Please don''t mix named and positional parameters, it makes me dizzy.', detail=detail, type="commandException");
 			}
 
 			// These are the parameters declared by the command CFC
@@ -283,56 +284,61 @@ component accessors="true" singleton {
 			// Add command to the top of the stack
 			instance.callStack.prepend( { commandInfo : commandInfo, environment : {} } );
 			
-			// If we're using postitional params, convert them to named
-			if( arrayLen( parameterInfo.positionalParameters ) ){
-				parameterInfo.namedParameters = convertToNamedParameters( parameterInfo.positionalParameters, commandParams );
-			}
-
-			// Merge flags into named params
-			mergeFlagParameters( parameterInfo );
-
-			// Add in defaults for every possible alias of this command
-			[]
-				.append( commandInfo.commandReference.originalName )
-				.append( commandInfo.commandReference.aliases, true )
-				.each( function( thisName ) {
-					addDefaultParameters( thisName, parameterInfo );
-				} );
-
-			// Make sure we have all required params.
-			parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
-
-			interceptorService.announceInterception( 'preCommandParamProcess', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
-
-			// Evaluate parameter expressions and system settings
-			evaluateExpressions( parameterInfo );
-			evaluateSystemSettings( parameterInfo );
-			combineColonParams( parameterInfo );
-
-			// Create globbing patterns
-			createGlobs( parameterInfo, commandParams );
-
-			// Ensure supplied params match the correct type
-			validateParams( parameterInfo.namedParameters, commandParams );
-
-			interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
-
-			// Tells us if we are going to capture the output of this command and pass it to another
-			// Used for our workaround to switch if the "run" command pipes to the terminal or not
-			// If there are more commands in the chain and we are going to pipe or redirect to them
-			if( arrayLen( commandChain ) > i && listFindNoCase( '|,>,>>', commandChain[ i+1 ].originalLine ) ) {
-				captureOutput = true;
-			}
-			
-			// This is my workaround to "smartly" capture the output of the run command if we're piping it or 
-			// nesting it as an expression, etc.
-			if( commandInfo.commandReference.originalName == 'run' && captureOutput ) {
-				parameterInfo.namedParameters.interactive=false;
-			} 
-			
-			
+			// Start the try as soon as we prepend to the call stack so any errors from here on out, even parsing the params, will 
+			// correct remove this call from the stack in the finally block.
+			try {
+							
+				// If we're using postitional params, convert them to named
+				if( arrayLen( parameterInfo.positionalParameters ) ){
+					parameterInfo.namedParameters = convertToNamedParameters( parameterInfo.positionalParameters, commandParams );
+				}
+	
+				// Merge flags into named params
+				mergeFlagParameters( parameterInfo );
+	
+				// Add in defaults for every possible alias of this command
+				[]
+					.append( commandInfo.commandReference.originalName )
+					.append( commandInfo.commandReference.aliases, true )
+					.each( function( thisName ) {
+						addDefaultParameters( thisName, parameterInfo );
+					} );
+	
+				// Make sure we have all required params.
+				parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
+	
+				interceptorService.announceInterception( 'preCommandParamProcess', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
+	
+				// System settings need evaluated prior to expressions!
+				evaluateSystemSettings( parameterInfo );
+				evaluateExpressions( parameterInfo );
+				
+				// Combine params like command foo:bar=1 foo:baz=2 foo:bum=3
+				combineColonParams( parameterInfo );
+	
+				// Create globbing patterns
+				createGlobs( parameterInfo, commandParams );
+	
+				// Ensure supplied params match the correct type
+				validateParams( parameterInfo.namedParameters, commandParams );
+	
+				interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
+	
+				// Tells us if we are going to capture the output of this command and pass it to another
+				// Used for our workaround to switch if the "run" command pipes to the terminal or not
+				// If there are more commands in the chain and we are going to pipe or redirect to them
+				if( arrayLen( commandChain ) > i && listFindNoCase( '|,>,>>', commandChain[ i+1 ].originalLine ) ) {
+					captureOutput = true;
+				}
+				
+				// This is my workaround to "smartly" capture the output of the run command if we're piping it or 
+				// nesting it as an expression, etc.
+				if( commandInfo.commandReference.originalName == 'run' && captureOutput ) {
+					parameterInfo.namedParameters.interactive=false;
+				} 
+				
+				
 			// Run the command
-			try {				
 				var result = commandInfo.commandReference.CFC.run( argumentCollection = parameterInfo.namedParameters );
 				lastCommandErrored = commandInfo.commandReference.CFC.hasError();
 			} catch( any e ){
@@ -541,19 +547,19 @@ component accessors="true" singleton {
 	 * Figure out what command to run based on the the user input string
 	 * @line.hint A string containing the command and parameters that the user entered
  	 **/
-	function resolveCommand( required string line ){
+	function resolveCommand( required string line, boolean forCompletion=false ){
 		// Turn the users input into an array of tokens
 		var tokens = parser.tokenizeInput( line );
-
-		return resolveCommandTokens( tokens );
+		
+		return resolveCommandTokens( tokens, line, forCompletion );
 	}
 
 	/**
 	 * Figure out what command to run based on the tokenized user input
 	 * @tokens.hint An array containing the command and parameters that the user entered
  	 **/
-	function resolveCommandTokens( required array tokens ){
-
+	function resolveCommandTokens( required array tokens, string rawLine=tokens.toList( ' ' ), boolean forCompletion=false ){
+					
 		// This will hold the command chain. Usually just a single command,
 		// but a pipe ("|") will chain together commands and pass the output of one along as the input to the next
 		var commandsToResolve = breakTokensIntoChain( tokens );
@@ -562,6 +568,7 @@ component accessors="true" singleton {
 		// command hierarchy
 		var cmds = getCommandHierarchy();
 		var helpTokens = 'help,?,/?';
+		var stopProcessingLine = false;
 
 		for( var commandTokens in commandsToResolve ){
 
@@ -605,11 +612,20 @@ component accessors="true" singleton {
 			* would essentially be turned into
 			* run "cmd /c dir"
 			 */
-			 if( tokens.len() > 2 && tokens.first() == 'run' ) {
+			 if( tokens.len() > 1 && tokens.first() == 'run' ) {
+			 	
 			 	tokens = [
 			 		'run',
-			 		tokens.slice( 2, tokens.len()-1 ).toList( ' ' )
+			 		// Strip off "!" or "run" at the start of the raw line.
+			 		// TODO: this line will fail:
+			 		//   echo "!git status" && !git status
+			 		// Because we don't know where in the rawLine our current place in the command chain starts
+			 		// To fix it though I'd need to substantially change how tokenizing works
+			 		rawLine.reReplaceNoCase( '^(.*?)?[\s]*(run |!)[\s]*(#tokens[ 2 ]#.*)', '\3' )
 			 	];
+			 	
+			 	// The run command "eats" end entire rest of the line, so stop processing the command chain.
+				stopProcessingLine = true;
 			 }
 
 			// Shortcut for "cfml" command if first token starts with #
@@ -640,6 +656,18 @@ component accessors="true" singleton {
 				// If we hit a dead end, then quit looking
 				if( !structKeyExists( results.commandReference, token ) ){
 					break;
+				}
+					
+				// If this is for command tab completion, don't select the command if there are two commands at the same level that start wtih this string
+				if( forCompletion ) {
+					if( results.commandReference
+						.keyArray()
+						.filter( function( i ){
+							return i.lcase().startsWith( token.lcase() );
+						} )
+						.len() > 1 ) {
+							break;
+						}
 				}
 
 				// Move the pointer
@@ -675,7 +703,12 @@ component accessors="true" singleton {
 			}
 
 			commandChain.append( results );
-
+			
+			// Quit here if we're done with this command line
+			if( stopProcessingLine ) {
+				break;
+			}
+			
 		} // end loop over commands to resolve
 
 		// Return command chain
@@ -909,6 +942,12 @@ component accessors="true" singleton {
 			excludeFromHelp = commandMD.excludeFromHelp ?: false,
 			commandMD 		= commandMD
 		};
+		
+		// Fix for CFCs with no hint, they inherit this from the Lucee base compnent.
+		if( commandData.hint == 'This is the Base Component' ) {
+			commandData.hint = '';
+		}
+		
 		// check functions
 		if( structKeyExists( commandMD, 'functions' ) ){
 			// Capture the command's parameters

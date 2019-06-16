@@ -52,6 +52,7 @@ component accessors="true" singleton {
 			// Servers
 			'server',
 			'server.defaults',
+			'server.javaInstallDirectory',
 			// used in Artifactsservice
 			'artifactsDirectory',
 			// commands
@@ -70,7 +71,8 @@ component accessors="true" singleton {
 			'JSON.ANSIColors.number',
 			'JSON.ANSIColors.string',
 			// General
-			'verboseErrors'
+			'verboseErrors',
+			'debugNativeExecution'
 		]);
 
 		setConfigFilePath( '/commandbox-home/CommandBox.json' );

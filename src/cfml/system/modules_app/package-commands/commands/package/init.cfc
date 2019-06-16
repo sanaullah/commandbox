@@ -34,6 +34,8 @@ component aliases="init" {
 	 * @ignoreList Add commonly ignored files to the package's ignore list
 	 * @wizard Run the init wizard, defaults to false
 	 * @endpointName  Name of custom forgebox endpoint to use
+	 * @location Where the package is located
+	 * @type Type of pacakge (modules, etc)
 	 **/
 	function run(
 		name="My Package",
@@ -42,9 +44,12 @@ component aliases="init" {
 		boolean private=false,
 		shortDescription="A sweet package",
 		boolean ignoreList=true,
-		boolean wizard=false,
-		string endpointName
+		string location='ForgeboxStorage',
+		string type='modules',
+		string endpointName,
+		boolean wizard=false
 	){
+		
 		// Check for wizard argument
 		if( arguments.wizard ){
 			runCommand( 'package init-wizard' );
@@ -53,7 +58,7 @@ component aliases="init" {
 
 		// Clean this up so it doesn't get written as a property
 		structDelete( arguments, "wizard" );
-		var endpointName = arguemnts.endpointName;
+		var endpointName = arguments.endpointName;
 		structDelete( arguments, "endpointName" );
 		
 		endpointName = endpointName ?: configService.getSetting( 'endpoints.defaultForgeBoxEndpoint', 'forgebox' );
@@ -110,7 +115,7 @@ component aliases="init" {
 
 		// Ignore List
 		if( arguments.ignoreList ){
-			arguments[ "ignore" ] = serializeJSON( [ '**/.*', 'test', 'tests' ] );
+			arguments[ "ignore" ] = serializeJSON( [ '**/.*', '/test/', '/tests/' ] );
 		}
 		// Cleanup the argument so it does not get written.
 		structDelete( arguments, "ignoreList" );
