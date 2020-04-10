@@ -59,7 +59,7 @@ component{
 			// Pass through bash in interactive mode with -i to expand aliases like "ll".
 			// -c runs input as a command, "&& exits" cleanly from the shell as long as the original command ran successfully
 			var nativeShell = configService.getSetting( 'nativeShell', '/bin/bash' );
-			commandArray = [ nativeShell, '-i', '-c', arguments.command & ' 2>&1 && ( exit $? > /dev/null )' ];
+			commandArray = [ nativeShell, '-i', '-c', arguments.command & ' 2>&1; ( exit $? > /dev/null )' ];
 		}
 		
 		if( configService.getSetting( 'debugNativeExecution', false ) ) {
@@ -78,7 +78,7 @@ component{
             
             // incorporate CommandBox environment variables into the process's env
             var currentEnv = processBuilder.environment();
-            currentEnv.putAll( systemSettings.getAllEnvironmentsFlattened() );
+            currentEnv.putAll( systemSettings.getAllEnvironmentsFlattened().map( (k, v)=>toString(v) ) );
             
             // Special check to remove ConEMU vars which can screw up the sub process if it happens to run cmd, such as opening VSCode.
             if( fileSystemUtil.isWindows() && currentEnv.containsKey( 'ConEmuPID' ) ) {

@@ -26,6 +26,7 @@ component accessors="true" singleton {
 	property name='SystemSettings'		inject='SystemSettings';
 	property name='ConfigService'		inject='ConfigService';
 	property name='metadataCache'		inject='cachebox:metadataCache';
+	property name='FRTransService'		inject='FRTransService';
 
 	property name='configured' default="false" type="boolean";
 
@@ -90,7 +91,7 @@ component accessors="true" singleton {
 			listInfo	= 'query',
 			sort		= 'type desc, name asc'
 		);
-		
+
 		for( var dir in varDirs ){
 			// For CFC files, process them as a command
 			if( dir.type  == 'File' && listLast( dir.name, '.' ) == 'cfc' ){
@@ -131,7 +132,7 @@ component accessors="true" singleton {
 			consoleLogger.warn( "Removing extra text [box ] from start of command. You don't need that here." );
 			arguments.line = right( arguments.line, len( arguments.line ) - 4 );
 		}
-				
+
 		// Resolve the command they are wanting to run
 		var commandChain = resolveCommand( line );
 
@@ -164,7 +165,6 @@ component accessors="true" singleton {
 	 * @captureOutput Temp workaround to allow capture of run command
  	 **/
 	function runCommand( required array commandChain, required string line, string piped, boolean captureOutput=false ){
-
 		// If nothing is returned, something bad happened (like an error instatiating the CFC)
 		if( !commandChain.len() ){
 			return 'Command not run.';
@@ -230,7 +230,7 @@ component accessors="true" singleton {
 			// Parameters need to be ALL positional or ALL named
 			if( arrayLen( parameterInfo.positionalParameters ) && structCount( parameterInfo.namedParameters ) ){
 				shell.setExitCode( 1 );
-				var detail = "You specified named parameters: #structKeyList(parameterInfo.namedParameters)# but you did not specify a name for: #parameterInfo.positionalParameters[1]# #chr(10)##chr(9)#" & line; 
+				var detail = "You specified named parameters: #structKeyList(parameterInfo.namedParameters)# but you did not specify a name for: #parameterInfo.positionalParameters[1]# #chr(10)##chr(9)#" & line;
 				throw( message='Please don''t mix named and positional parameters, it makes me dizzy.', detail=detail, type="commandException");
 			}
 
@@ -267,13 +267,19 @@ component accessors="true" singleton {
 				structDelete( local, 'result', false );
 			}
 
-
 			// Reset the printBuffer
 			commandInfo.commandReference.CFC.reset();
 
+			// Tells us if we are going to capture the output of this command and pass it to another
+			// Used for our workaround to switch if the "run" command pipes to the terminal or not
+			// If there are more commands in the chain and we are going to pipe or redirect to them
+			if( arrayLen( commandChain ) > i && listFindNoCase( '|,>,>>', commandChain[ i+1 ].originalLine ) ) {
+				captureOutput = true;
+			}
+
 			// If there are currently executing commands, flush out the print buffer from the last one
 			// This will prevent the output from showing up out of order if one command nests a call to another.
-			if( instance.callStack.len() ){
+			if( instance.callStack.len() && !captureOutput ){
 				// Print anything in the buffer
 				shell.printString( instance.callStack[1].commandInfo.commandReference.CFC.getResult() );
 				// And reset it now that it's been printed.
@@ -283,76 +289,77 @@ component accessors="true" singleton {
 
 			// Add command to the top of the stack
 			instance.callStack.prepend( { commandInfo : commandInfo, environment : {} } );
-			
-			// Start the try as soon as we prepend to the call stack so any errors from here on out, even parsing the params, will 
-			// correct remove this call from the stack in the finally block.
+
+			if( captureOutput ) {
+				// This is really just a workaround for the fact that command output isn't naturally piped to the console.
+				// Once that is fixed, commands will no longer need to know this.
+				systemsettings.setSystemSetting( 'box_currentCommandPiped', true );
+			}
+
+			// Start the try as soon as we prepend to the call stack so any errors from here on out, even parsing the params, will
+			// correctly remove this call from the stack in the finally block.
 			try {
-							
+				var FRTrans = FRTransService.startTransaction( commandInfo.commandString.listChangeDelims( ' ', '.' ), commandInfo.originalLine );
+
 				// If we're using postitional params, convert them to named
 				if( arrayLen( parameterInfo.positionalParameters ) ){
 					parameterInfo.namedParameters = convertToNamedParameters( parameterInfo.positionalParameters, commandParams );
 				}
-	
+
 				// Merge flags into named params
 				mergeFlagParameters( parameterInfo );
-	
+
 				// Add in defaults for every possible alias of this command
 				[]
-					.append( commandInfo.commandReference.originalName )
+					.append( commandInfo.commandReference.originalName.replace( '.', ' ', 'all' ) )
 					.append( commandInfo.commandReference.aliases, true )
 					.each( function( thisName ) {
 						addDefaultParameters( thisName, parameterInfo );
 					} );
-	
+
 				// Make sure we have all required params.
 				parameterInfo.namedParameters = ensureRequiredParams( parameterInfo.namedParameters, commandParams );
-	
+
 				interceptorService.announceInterception( 'preCommandParamProcess', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
-	
+
 				// System settings need evaluated prior to expressions!
 				evaluateSystemSettings( parameterInfo );
 				evaluateExpressions( parameterInfo );
-				
+
 				// Combine params like command foo:bar=1 foo:baz=2 foo:bum=3
 				combineColonParams( parameterInfo );
-	
+
 				// Create globbing patterns
 				createGlobs( parameterInfo, commandParams );
-	
+
 				// Ensure supplied params match the correct type
 				validateParams( parameterInfo.namedParameters, commandParams );
-	
+
 				interceptorService.announceInterception( 'preCommand', { commandInfo=commandInfo, parameterInfo=parameterInfo } );
-	
-				// Tells us if we are going to capture the output of this command and pass it to another
-				// Used for our workaround to switch if the "run" command pipes to the terminal or not
-				// If there are more commands in the chain and we are going to pipe or redirect to them
-				if( arrayLen( commandChain ) > i && listFindNoCase( '|,>,>>', commandChain[ i+1 ].originalLine ) ) {
-					captureOutput = true;
-				}
-				
-				// This is my workaround to "smartly" capture the output of the run command if we're piping it or 
+
+				// This is my workaround to "smartly" capture the output of the run command if we're piping it or
 				// nesting it as an expression, etc.
 				if( commandInfo.commandReference.originalName == 'run' && captureOutput ) {
 					parameterInfo.namedParameters.interactive=false;
-				} 
-				
-				
-			// Run the command
+				}
+
+				// Run the command
 				var result = commandInfo.commandReference.CFC.run( argumentCollection = parameterInfo.namedParameters );
 				lastCommandErrored = commandInfo.commandReference.CFC.hasError();
+
 			} catch( any e ){
+				FRTransService.errorTransaction( FRTrans, e.getPageException() );
 				lastCommandErrored = true;
 				// If this command didn't already set a failing exit code...
 				if( commandInfo.commandReference.CFC.getExitCode() == 0 ) {
-					
+
 					// Go ahead and set one for it.  The shell will inherit it below in the finally block.
 					if( val( e.errorCode ?: 0 ) > 0 ) {
 						commandInfo.commandReference.CFC.setExitCode( e.errorCode );
 					} else {
 						commandInfo.commandReference.CFC.setExitCode( 1 );
 					}
-					
+
 				}
 
 				// Dump out anything the command had printed so far
@@ -366,7 +373,7 @@ component accessors="true" singleton {
 				// since in that case I don't want to execute the "echo" command since the "cat" failed.
 				if( arrayLen( commandChain ) > i && listFindNoCase( '||,;', commandChain[ i+1 ].originalLine ) ) {
 					// These are "expected" exceptions like validation errors that can be "pretty"
-					if( e.type == 'commandException' ) {
+					if( e.type.toString() == 'commandException' ) {
 						shell.printError( { message : e.message, detail: e.detail } );
 					// These are catastrophic errors that warrant a full stack trace.
 					} else {
@@ -381,6 +388,8 @@ component accessors="true" singleton {
 				instance.callStack.deleteAt( 1 );
 				// Set command exit code into the shell
 				shell.setExitCode( commandInfo.commandReference.CFC.getExitCode() );
+
+				FRTransService.endTransaction( FRTrans );
 			}
 
 			// If the command didn't return anything, grab its print buffer value
@@ -398,7 +407,7 @@ component accessors="true" singleton {
 			local.result = interceptData.result;
 
 		} // End loop over command chain
-		
+
 		return local.result;
 
 	}
@@ -552,7 +561,7 @@ component accessors="true" singleton {
 	function resolveCommand( required string line, boolean forCompletion=false ){
 		// Turn the users input into an array of tokens
 		var tokens = parser.tokenizeInput( line );
-		
+
 		return resolveCommandTokens( tokens, line, forCompletion );
 	}
 
@@ -561,7 +570,7 @@ component accessors="true" singleton {
 	 * @tokens.hint An array containing the command and parameters that the user entered
  	 **/
 	function resolveCommandTokens( required array tokens, string rawLine=tokens.toList( ' ' ), boolean forCompletion=false ){
-					
+
 		// This will hold the command chain. Usually just a single command,
 		// but a pipe ("|") will chain together commands and pass the output of one along as the input to the next
 		var commandsToResolve = breakTokensIntoChain( tokens );
@@ -615,7 +624,7 @@ component accessors="true" singleton {
 			* run "cmd /c dir"
 			 */
 			 if( tokens.len() > 1 && tokens.first() == 'run' ) {
-			
+
 				var tokens2 = tokens[ 2 ];
 				// Escape any regex metacharacters in the pattern
 				tokens2 = replace( tokens2, '\', '\\', 'all' );
@@ -628,7 +637,7 @@ component accessors="true" singleton {
 				tokens2 = replace( tokens2, '+', '\+', 'all' );
 				tokens2 = replace( tokens2, '{', '\{', 'all' );
 				tokens2 = replace( tokens2, '}', '\}', 'all' );
-			 	
+
 			 	tokens = [
 			 		'run',
 			 		// Strip off "!" or "run" at the start of the raw line.
@@ -638,7 +647,7 @@ component accessors="true" singleton {
 			 		// To fix it though I'd need to substantially change how tokenizing works
 			 		rawLine.reReplaceNoCase( '^(.*?)?[\s]*(run |!)[\s]*(#tokens2#.*)', '\3' )
 			 	];
-			 	
+
 			 	// The run command "eats" end entire rest of the line, so stop processing the command chain.
 				stopProcessingLine = true;
 			 }
@@ -674,7 +683,7 @@ component accessors="true" singleton {
 				if( !structKeyExists( results.commandReference, token ) ){
 					break;
 				}
-					
+
 				// If this is for command tab completion, don't select the command if there are two commands at the same level that start wtih this string
 				// This check only runs if we've matched all the entered tokens and there is no trailing space.
 				if( forCompletion && pos == tokens.len() ) {
@@ -721,12 +730,12 @@ component accessors="true" singleton {
 			}
 
 			commandChain.append( results );
-			
+
 			// Quit here if we're done with this command line
 			if( stopProcessingLine ) {
 				break;
 			}
-			
+
 		} // end loop over commands to resolve
 
 		// Return command chain
@@ -940,7 +949,7 @@ component accessors="true" singleton {
 	* @fullCFCPath the full CFC path
 	* @commandName the command name
 	*/
-	private struct function createCommandData( required fullCFCPath, required commandName ){	
+	private struct function createCommandData( required fullCFCPath, required commandName ){
 		// Get from cache or produce on demand
 		var commandMD = metadataCache.getOrSet(
 			fullCFCPath,
@@ -948,7 +957,7 @@ component accessors="true" singleton {
 				return wirebox.getUtil().getInheritedMetaData( fullCFCPath );
 			}
 		);
-		
+
 		// Set up of command data
 		var commandData = {
 			fullCFCPath 	= arguments.fullCFCPath,
@@ -960,12 +969,12 @@ component accessors="true" singleton {
 			excludeFromHelp = commandMD.excludeFromHelp ?: false,
 			commandMD 		= commandMD
 		};
-		
+
 		// Fix for CFCs with no hint, they inherit this from the Lucee base compnent.
 		if( commandData.hint == 'This is the Base Component' ) {
 			commandData.hint = '';
 		}
-		
+
 		// check functions
 		if( structKeyExists( commandMD, 'functions' ) ){
 			// Capture the command's parameters
@@ -1081,8 +1090,8 @@ component accessors="true" singleton {
 
 					// Overwrite it with an actual Globber instance seeded with the original canonical path as the pattern.
 					var originalPath = parameterInfo.namedParameters[ paramName ];
-					var newPath = fileSystemUtil.resolvePath( originalPath );
-					
+					var newPath = originalPath.listMap( (p) => fileSystemUtil.resolvePath( p ) );
+
 					parameterInfo.namedParameters[ paramName ] = wirebox.getInstance( 'Globber' )
 						.setPattern( newPath );
 				}
@@ -1159,7 +1168,7 @@ component accessors="true" singleton {
 		} );
 
 	}
-	
+
 
 	/**
 	 * Get the array of commands being executed.

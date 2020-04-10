@@ -177,6 +177,10 @@ component singleton {
 								if( !len( leftOver ) || lcase( flagParamName ).startsWith( lcase( leftOver ) ) ) {
 									add( candidates, flagParamName, 'Flags', param.hint ?: '', true );
 								}
+								var flagParamName = '--no' & param.name;
+								if( !len( leftOver ) || lcase( flagParamName ).startsWith( lcase( leftOver ) ) ) {
+									add( candidates, flagParamName, 'Flags', param.hint ?: '', true );
+								}
 							}
 						} // Does it exist yet?
 					} // Loop over possible params
@@ -248,6 +252,10 @@ component singleton {
 									if( lcase( paramFlagname ).startsWith( lcase( partialMatch ) ) ) {
 										add( candidates, paramFlagname, 'Flags', param.hint ?: '', true );
 									}
+									var paramFlagname = '--no' & param.name;
+									if( lcase( paramFlagname ).startsWith( lcase( partialMatch ) ) ) {
+										add( candidates, paramFlagname, 'Flags', param.hint ?: '', true );
+									}
 								}
 							}
 
@@ -282,6 +290,12 @@ component singleton {
 
 							// If this param is a boolean that isn't a flag yet, sugguest the --flag version
 							var paramFlagname = '--' & param.name;
+							if( param.type == 'boolean' && !structKeyExists( passedParameters.flags, param.name ) && lcase( paramFlagname ).startsWith( lcase( partialMatch ) ) ) {
+								add( candidates, paramFlagname, 'Flags', param.hint ?: '', true );
+							}
+
+							// If this param is a boolean that isn't a flag yet, sugguest the --flag version
+							var paramFlagname = '--no' & param.name;
 							if( param.type == 'boolean' && !structKeyExists( passedParameters.flags, param.name ) && lcase( paramFlagname ).startsWith( lcase( partialMatch ) ) ) {
 								add( candidates, paramFlagname, 'Flags', param.hint ?: '', true );
 							}
@@ -399,13 +413,13 @@ component singleton {
  	 **/
 	private function pathCompletion(String startsWith, required candidates, showFiles=true, paramName, namedParams ) {
 		// keep track of the original here so we can put it back like the user had
-		var originalStartsWith = fileSystemUtil.normalizeSlashes( arguments.startsWith );
+		var originalStartsWith = arguments.startsWith;
 		// Fully resolve the path.
 		arguments.startsWith = fileSystemUtil.resolvePath( arguments.startsWith );
 		startsWith = fileSystemUtil.normalizeSlashes( startsWith );
 
 		// Even if the incoming string is a folder, keep off the trailing slash if the user hadn't typed it yet.
-		if( originalStartsWith.len() && !originalStartsWith.endsWith( '/' ) && startsWith.endsWith( '/' ) ) {
+		if( originalStartsWith.len() && !listFind( '\,/', originalStartsWith.right( 1 ) ) && startsWith.endsWith( '/' ) ) {
 			startsWith = startsWith.left( -1 );
 		}
 
@@ -443,7 +457,7 @@ component singleton {
 
 						// This is the absolute path that we matched
 						var thisCandidate = searchIn & ( right( searchIn, 1 ) == '/' ? '' : '/' ) & path.name;
-
+		
 						// ...strip it back down to what they typed
 						thisCandidate = replaceNoCase( thisCandidate, startsWith, originalStartsWith );
 
@@ -496,7 +510,6 @@ component singleton {
 	* JLine3 needs an array of Java objects, so convert our array of strings to that
  	**/
 	private function add( candidates, name, group='', description='', boolean complete = false ) {
-
 		candidates.append(
 			createObject( 'java', 'org.jline.reader.Candidate' )
 				.init(

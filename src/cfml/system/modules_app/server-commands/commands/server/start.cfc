@@ -74,6 +74,7 @@ component aliases="start" {
 	 * @minHeapSize			The min heap size in megabytes you would like this server to start with
 	 * @directoryBrowsing 	Enable/Disabled directory browsing, defaults to false
 	 * @JVMArgs 			Additional JVM args to use when starting the server. Use "server status --verbose" to debug
+	 * @runwarJarPath		path to runwar jar (overrides the default runwar location in the ~/.CommandBox/lib/ folder)
 	 * @runwarArgs 			Additional Runwar options to use when starting the server. Use "server status --verbose" to debug
 	 * @saveSettings 		Save start settings in server.json
 	 * @cfengine        	sets the cfml engine type
@@ -89,8 +90,12 @@ component aliases="start" {
 	 * @javaHomeDirectory	Path to the JRE home directory containing ./bin/java
 	 * @AJPEnable			Enable AJP
 	 * @AJPPort				AJP Port number
-	 * @javaVersion			Any endpoint ID, such as "java:openjdk11" fromt the Java endpoint 
+	 * @javaVersion			Any endpoint ID, such as "java:openjdk11" from the Java endpoint 
 	 * @javaVersion.optionsUDF	javaVersionComplete
+	 * @startScript			If you want to generate a native script to directly start the server process pass bash, cmd, or pwsh
+	 * @startScript.options	bash,cmd,pwsh
+	 * @startScriptFile		Optional override for the name and location of the start script. This is ignored if no startScript param is specified
+	 * @dryRun				Pass true to abort actually starting the server process, but all instalation and downloading will still be performed to "warm up" the engine installation.
 	 **/
 	function run(
 		String  name,
@@ -132,7 +137,10 @@ component aliases="start" {
 		String javaHomeDirectory,
 		Boolean AJPEnable,
 		Numeric AJPPort,
-		String javaVersion
+		String javaVersion,
+		String startScript,
+		String startScriptFile,
+		Boolean dryRun
 	){
 
 		// This is a common mis spelling

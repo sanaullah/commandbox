@@ -142,6 +142,7 @@ component accessors="true" singleton {
 				'accessLogEnable' : d.web.accessLogEnable ?: false,
 				'GZIPEnable' : d.web.GZIPEnable ?: true,
 				'welcomeFiles' : d.web.welcomeFiles ?: '',
+				'maxRequests' : d.web.maxRequests ?: '',
 				'HTTP' : {
 					'port' : d.web.http.port ?: 0,
 					'enable' : d.web.http.enable ?: true
@@ -184,7 +185,12 @@ component accessors="true" singleton {
 				'sessionCookieHTTPOnly' : d.app.sessionCookieHTTPOnly ?: false
 			},
 			'runwar' : {
-				'args' : d.runwar.args ?: ''
+				'jarPath' : d.runwar.jarPath ?: variables.jarPath,
+				'args' : d.runwar.args ?: '',
+				// Duplicate so onServerStart interceptors don't actually change config settings via reference.
+				'XNIOOptions' : duplicate( d.runwar.XNIOOptions ?: {} ),
+				// Duplicate so onServerStart interceptors don't actually change config settings via reference.
+				'undertowOptions' : duplicate( d.runwar.undertowOptions ?: {} )
 			}
 		};
 	}
@@ -242,6 +248,12 @@ component accessors="true" singleton {
 		if( !isNull( serverProps.SSLKeyFile ) ) {
 			serverProps.SSLKeyFile = fileSystemUtil.resolvePath( serverProps.SSLKeyFile );
 		}
+		if( !isNull( serverProps.javaHomeDirectory ) ) {
+			serverProps.javaHomeDirectory = fileSystemUtil.resolvePath( serverProps.javaHomeDirectory );
+		}
+		if( !isNull( serverProps.runwarJarPath ) ) {
+			serverProps.runwarJarPath = fileSystemUtil.resolvePath( serverProps.runwarJarPath );
+		}
 
 		if( structKeyExists( serverProps, 'trace' ) && serverProps.trace ) {
 			serverProps.debug = true;
@@ -260,7 +272,7 @@ component accessors="true" singleton {
 		var serverInfo = serverDetails.serverinfo;
 
 		// If the server is already running, make sure the user really wants to do this.
-		if( isServerRunning( serverInfo ) && !(serverProps.force ?: false ) ) {
+		if( isServerRunning( serverInfo ) && !(serverProps.force ?: false ) && !(serverProps.dryRun ?: false ) ) {
 			job.addErrorLog( 'Server "#serverInfo.name#" (#serverInfo.webroot#) is already running!' );
 			job.addErrorLog( 'Overwriting a running server means you won''t be able to use the "stop" command to stop the original one.' );
 			job.addWarnLog( 'Use the --force parameter to skip this check.' );
@@ -329,7 +341,7 @@ component accessors="true" singleton {
 		// Save hand-entered properties in our server.json for next time
 		for( var prop in serverProps ) {
 			// Ignore null props or ones that shouldn't be saved
-			if( isNull( serverProps[ prop ] ) || listFindNoCase( 'saveSettings,serverConfigFile,debug,force,console,trace', prop ) ) {
+			if( isNull( serverProps[ prop ] ) || listFindNoCase( 'saveSettings,serverConfigFile,debug,force,console,trace,startScript,startScriptFile,dryRun', prop ) ) {
 				continue;
 			}
 	    	var configPath = replace( fileSystemUtil.resolvePath( defaultServerConfigFileDirectory ), '\', '/', 'all' );
@@ -485,6 +497,9 @@ component accessors="true" singleton {
 			    case "javaVersion":
 					serverJSON[ 'JVM' ][ 'javaVersion' ] = serverProps[ prop ];
 			         break;
+				case "runwarJarPath":
+					serverJSON[ 'runwar' ][ 'jarPath' ] = serverProps[ prop ];
+					 break;
 			    case "runwarArgs":
 					serverJSON[ 'runwar' ][ 'args' ] = serverProps[ prop ];
 			         break;
@@ -591,6 +606,7 @@ component accessors="true" singleton {
 		serverInfo.basicAuthEnable 	= 								   serverJSON.web.basicAuth.enable		?: defaults.web.basicAuth.enable;
 		serverInfo.basicAuthUsers 	= 								   serverJSON.web.basicAuth.users		?: defaults.web.basicAuth.users;
 		serverInfo.welcomeFiles 	= serverProps.welcomeFiles		?: serverJSON.web.welcomeFiles			?: defaults.web.welcomeFiles;
+		serverInfo.maxRequests		= 								   serverJSON.web.maxRequests			?: defaults.web.maxRequests;
 
 		serverInfo.trayEnable	 	= serverJSON.trayEnable			?: defaults.trayEnable;
 
@@ -631,13 +647,13 @@ component accessors="true" singleton {
 			serverInfo.javaVersion = serverProps.javaVersion;
 		// Then server.json java home dir
 		} else if( isDefined( 'serverJSON.JVM.javaHome' ) ) {
-			serverInfo.javaHome = serverJSON.JVM.javaHome;
+			serverInfo.javaHome = fileSystemUtil.resolvePath( serverJSON.JVM.javaHome, defaultServerConfigFileDirectory );
 		// Then server.json java version
 		} else if( isDefined( 'serverJSON.JVM.javaVersion' ) ) {
 			serverInfo.javaVersion = serverJSON.JVM.javaVersion;
 		// Then server defaults java home dir
 		} else if( defaults.JVM.javaHome.len() ) {
-			serverInfo.javaHome = defaults.JVM.javaHome;
+			serverInfo.javaHome = fileSystemUtil.resolvePath( defaults.JVM.javaHome, defaultwebroot );
 		// Then server defaults java versiom
 		} else if( defaults.JVM.javaVersion.len() ) {
 			serverInfo.javaVersion = defaults.JVM.javaVersion;
@@ -702,8 +718,17 @@ component accessors="true" singleton {
 		serverInfo.JVMargs			= ( serverProps.JVMargs			?: serverJSON.JVM.args ?: '' ) & ' ' & defaults.JVM.args;
 
 		// Global defauls are always added on top of whatever is specified by the user or server.json
-		serverInfo.runwarArgs		= ( serverProps.runwarArgs		?: serverJSON.runwar.args ?: '' ) & ' ' & defaults.runwar.args;
+		serverInfo.runwarJarPath	= serverProps.runwarJarPath		?: serverJSON.runwar.jarPath	?: defaults.runwar.jarPath;
 
+		// Global defauls are always added on top of whatever is specified by the user or server.json
+		serverInfo.runwarArgs		= ( serverProps.runwarArgs		?: serverJSON.runwar.args ?: '' ) & ' ' & defaults.runwar.args;
+		
+		// Global defauls are always added on top of whatever is specified by the user or server.json
+		serverInfo.runwarXNIOOptions	= ( serverJSON.runwar.XNIOOptions ?: {} ).append( defaults.runwar.XNIOOptions, true );
+		
+		// Global defauls are always added on top of whatever is specified by the user or server.json
+		serverInfo.runwarUndertowOptions	= ( serverJSON.runwar.UndertowOptions ?: {} ).append( defaults.runwar.UndertowOptions, true );
+		
 		// Server startup timeout
 		serverInfo.startTimeout		= serverProps.startTimeout 			?: serverJSON.startTimeout 	?: defaults.startTimeout;
 
@@ -790,6 +815,17 @@ component accessors="true" singleton {
 
 			// This will install the engine war to start, possibly downloading it first
 			var installDetails = serverEngineService.install( cfengine=serverInfo.cfengine, basedirectory=serverinfo.customServerFolder, serverInfo=serverInfo, serverHomeDirectory=serverInfo.serverHomeDirectory );
+			
+			// If we couldn't guess the engine type above, give it another go.  Perhaps the box.json in the CF Engine gave us a clue.
+			// This happens then starting like so 
+			// start cfengine=http://hostname/rest/update/provider/forgebox/5.3.4.54-rc
+			// Because the cfengine value doesn't actually contain "lucee" but the box.json in the download will tell us
+			if( !len( CFEngineName ) ) {				
+			    CFEngineName = installDetails.engineName contains 'lucee' ? 'lucee' : CFEngineName;
+			    CFEngineName = installDetails.engineName contains 'railo' ? 'railo' : CFEngineName;
+			    CFEngineName = installDetails.engineName contains 'adobe' ? 'adobe' : CFEngineName;
+			}
+			
 			serverInfo.serverHomeDirectory = installDetails.installDir;
 			// TODO: As of 3.5 "serverHome" is for backwards compat.  Remove in later version in favor of serverHomeDirectory above
 			serverInfo[ 'serverHome' ] = installDetails.installDir;
@@ -827,7 +863,7 @@ component accessors="true" singleton {
 			// The process native name
 			var processName = ( serverInfo.name is "" ? "CommandBox" : serverInfo.name ) & ' [' & listFirst( serverinfo.cfengine, '@' ) & ' ' & installDetails.version & ']';
 			var displayServerName = ( serverInfo.name is "" ? "CommandBox" : serverInfo.name );
-			var displayEngineName = listFirst( serverinfo.cfengine, '@' ) & ' ' & installDetails.version;
+			var displayEngineName = serverInfo.engineName & ' ' & installDetails.version;
 
 		// This is a WAR
 		} else {
@@ -955,8 +991,10 @@ component accessors="true" singleton {
 		}
 
 		openItems.prepend( { 'label':'Site Home', 'action':'openbrowser', 'url': serverInfo.openbrowserURL, 'image' : expandPath('/commandbox/system/config/server-icons/home.png' ) } );
+		
+		openItems.prepend( { "label" : "Server Home", "action" : "openfilesystem", "path" : serverInfo.serverHomeDirectory, "image" : expandPath('/commandbox/system/config/server-icons/folder.png' ) } );
 
-		openItems.prepend( { "label" : "File System", "hotkey" : "B", "action" : "openfilesystem", "path" : serverInfo.appFileSystemPath, "image" : expandPath('/commandbox/system/config/server-icons/folder.png' ) } );
+		openItems.prepend( { "label" : "Webroot", "action" : "openfilesystem", "path" : serverInfo.appFileSystemPath, "image" : expandPath('/commandbox/system/config/server-icons/folder.png' ) } );
 
 		serverInfo.trayOptions.prepend( { 'label':'Open...', 'items': openItems, "image" : expandPath('/commandbox/system/config/server-icons/open.png' ) } );
 
@@ -1006,12 +1044,11 @@ component accessors="true" singleton {
 
 		// This is an array of tokens to send to the process builder
 		var args = [];
-
 		// "borrow" the CommandBox commandline parser to tokenize the JVM args. Not perfect, but close. Handles quoted values with spaces.
 		var argTokens = parser.tokenizeInput( serverInfo.JVMargs )
 			.map( function( i ){
-				// Clean up a couple escapes the parser does that we don't need
-				return parser.unwrapQuotes( i.replace( '\=', '=', 'all' ).replace( '\\', '\', 'all' ).replace( ';', '\;', 'all' ) );
+				// unwrap quotes, and unescape any special chars like \" inside the string
+				return parser.replaceEscapedChars( parser.removeEscapedChars( parser.unwrapQuotes( i ) ) );
 			});
 			
 			
@@ -1033,23 +1070,35 @@ component accessors="true" singleton {
 		if( len( trim( javaAgent ) ) ) { argTokens.append( javaagent ); }
 
 		 args
-		 	.append( '-jar' ).append( variables.jarPath )
-		 	.append( '--background=#background#' )
-		 	.append( '--host' ).append( serverInfo.host )
-		 	.append( '--stop-port' ).append( serverInfo.stopsocket )
-		 	.append( '--processname' ).append( processName )
-		 	.append( '--log-dir' ).append( serverInfo.logDir )
-		 	.append( '--server-name' ).append( serverInfo.name )
-		 	.append( '--tray-icon' ).append( serverInfo.trayIcon )
-		 	.append( '--tray-config' ).append( trayOptionsPath )
-		 	.append( '--tray-enable' ).append( serverInfo.trayEnable )
-		 	.append( '--directoryindex' ).append( serverInfo.directoryBrowsing )
-		 	.append( '--timeout' ).append( serverInfo.startTimeout )
-		 	.append( '--proxy-peeraddress' ).append( 'true' )
-		 	.append( '--cookie-secure' ).append( serverInfo.sessionCookieSecure )
-		 	.append( '--cookie-httponly' ).append( serverInfo.sessionCookieHTTPOnly )
-		 	.append( serverInfo.runwarArgs.listToArray( ' ' ), true );
+		 	.append( '-jar' ).append( serverInfo.runwarJarPath )
+			.append( '--background=#background#' )
+			.append( '--host' ).append( serverInfo.host )
+			.append( '--stop-port' ).append( serverInfo.stopsocket )
+			.append( '--processname' ).append( processName )
+			.append( '--log-dir' ).append( serverInfo.logDir )
+			.append( '--server-name' ).append( serverInfo.name )
+			.append( '--tray-enable' ).append( serverInfo.trayEnable )
+			.append( '--directoryindex' ).append( serverInfo.directoryBrowsing )
+			.append( '--timeout' ).append( serverInfo.startTimeout )
+			.append( '--proxy-peeraddress' ).append( 'true' )
+			.append( '--cookie-secure' ).append( serverInfo.sessionCookieSecure )
+			.append( '--cookie-httponly' ).append( serverInfo.sessionCookieHTTPOnly )
+			.append( serverInfo.runwarArgs.listToArray( ' ' ), true );
 
+		if( serverInfo.trayEnable ) {
+			args
+				.append( '--tray-icon' ).append( serverInfo.trayIcon )
+				.append( '--tray-config' ).append( trayOptionsPath )
+		}
+		
+		if( serverInfo.runwarXNIOOptions.count() ) {
+			args.append( '--xnio-options=' & serverInfo.runwarXNIOOptions.reduce( ( opts='', k, v ) => opts.listAppend( k & '=' & v ) ) );
+		} 	
+		
+		if( serverInfo.runwarUndertowOptions.count() ) {
+			args.append( '--undertow-options=' & serverInfo.runwarUndertowOptions.reduce( ( opts='', k, v ) => opts.listAppend( k & '=' & v ) ) );
+		}
+		 	
 		if( serverInfo.debug ) {
 			// Debug is getting turned on any time I include the --debug flag regardless of whether it's true or false.
 			args.append( '--debug' ).append( serverInfo.debug );
@@ -1057,8 +1106,6 @@ component accessors="true" singleton {
 
 		if( len( serverInfo.restMappings ) ) {
 			args.append( '--servlet-rest-mappings' ).append( serverInfo.restMappings );
-		} else {
-			args.append( '--servlet-rest-mappings' ).append( '__DISABLED__' );
 		}
 
 		if( serverInfo.trace ) {
@@ -1098,6 +1145,9 @@ component accessors="true" singleton {
 	 	if( len( serverInfo.welcomeFiles ) ) {
 	 		 args.append( '--welcome-files' ).append( serverInfo.welcomeFiles );
 	 	}
+	 	if( len( serverInfo.maxRequests ) ) {
+	 		 args.append( '--worker-threads' ).append( serverInfo.maxRequests );
+	 	}	 	
 	 	if( len( CLIAliases ) ) {
 	 		 args.append( '--dirs' ).append( CLIAliases );
 	 	}
@@ -1105,7 +1155,9 @@ component accessors="true" singleton {
 
 		// If background, wrap up JVM args to pass through to background servers.  "Real" JVM args must come before Runwar args
 		if( background ) {
-			var argString = argTokens.toList( ';' );
+			// Escape any semi colons in the args so Runwar can process this properly
+			// -Darg=one;-Darg=two
+			var argString = argTokens.map( ( token ) => token.replace( ';', '\;', 'all' ) ).toList( ';' );
 			if( len( argString ) ) {
 				args.append( '--jvm-args=#trim( argString )#' );
 			}
@@ -1218,7 +1270,7 @@ component accessors="true" singleton {
 	    if( !fileSystemUtil.isWindows() && background ) {
 	    	// The shell script will take care of creating this file and emptying it every time
 	    	var nohupLog = '#serverInfo.serverHomeDirectory#/nohup.log';
-	    	// Pass log file to external process.  This is no we can capture the output of the server process
+	    	// Pass log file to external process.  This is so we can capture the output of the server process
 	    	args.prepend( '#serverInfo.serverHomeDirectory#/nohup.log' );
 	    	// Use this intermediate shell script to start our server via nohup
 	    	args.prepend( expandPath( '/server-commands/bin/server_spawner.sh' ) );
@@ -1226,12 +1278,47 @@ component accessors="true" singleton {
 			args.prepend( expandPath( '/bin/bash' ) );
 	    }
 
+		// At this point all command line arguments are in place, announce this
+		var interceptData = {
+			commandLineArguments=args,
+			serverInfo=serverInfo,
+			serverJSON=serverJSON,
+			defaults=defaults,
+			serverProps=serverProps,
+			serverDetails=serverDetails,
+			installDetails=installDetails ?: {}
+		};
+		interceptorService.announceInterception( 'onServerProcessLaunch', interceptData );
+		// ensure we get the updated args if they were replaced wholesale by interceptor
+		args = interceptData.commandLineArguments;
+
+		// now we can log the *final* command line string that will be used to start the server
 	    if( serverInfo.debug ) {
 			var cleanedArgs = cr & '    ' & trim( reReplaceNoCase( args.toList( ' ' ), ' (-|"-)', cr & '    \1', 'all' ) );
 			job.addLog("Server start command: #cleanedargs#");
 	    }
 
+		if( serverProps.dryRun ?: false ) {
+			job.addLog( 'Dry run specified, exiting without starting server.' );
+			job.complete( serverInfo.debug );
+			return;
+		}
+
 	    processBuilder.init( args );
+
+        // incorporate CommandBox environment variables into the process's env
+        var currentEnv = processBuilder.environment();
+        currentEnv.putAll( systemSettings.getAllEnvironmentsFlattened().map( (k, v)=>toString(v) ) );
+
+        // Special check to remove ConEMU vars which can screw up the sub process if it happens to run cmd, such as opening VSCode.
+        if( fileSystemUtil.isWindows() && currentEnv.containsKey( 'ConEmuPID' ) ) {
+            for( var key in currentEnv ) {
+            	if( key.startsWith( 'ConEmu' ) || key == 'PROMPT' ) {
+            		currentEnv.remove( key );
+            	}
+            }
+        }
+
 	    // Conjoin standard error and output for convenience.
 	    processBuilder.redirectErrorStream( true );
 	    // Kick off actual process
@@ -1250,6 +1337,8 @@ component accessors="true" singleton {
 		// This may be available as parent thread or something.
 		var thisThread = createObject( 'java', 'java.lang.Thread' ).currentThread();
 		variables.waitingOnConsoleStart = false;
+		variables.internalInterrupt = false;
+		serverInfo.exitCode = 0;
 		// Spin up a thread to capture the standard out and error from the server
 		thread name="#threadName#" interactiveStart=interactiveStart serverInfo=serverInfo args=args startTimeout=serverInfo.startTimeout parentThread=thisThread {
 			try{
@@ -1271,13 +1360,13 @@ component accessors="true" singleton {
 					// Log messages from the CF engine or app code writing direclty to std/err out strip off "runwar.context" but leave color coded severity
 					// Ex:
 					// [INFO ] runwar.context: 04/11 15:47:10 INFO Starting Flex 1.5 CF Edition
-					line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.context: )(.*)', '\1 \3' );
+					line = reReplaceNoCase( line, '^((#chr( 27 )#\[m)?\[[^]]*])( runwar\.context: )(.*)', '\1 \4' );
 
 					// Log messages from runwar itself, simplify the logging category to just "Runwar:" and leave color coded severity
 					// Ex:
 					// [DEBUG] runwar.config: Enabling Proxy Peer Address handling
 					// [DEBUG] runwar.server: Starting open browser action
-					line = reReplaceNoCase( line, '^(#chr( 27 )#\[m\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \3' );
+					line = reReplaceNoCase( line, '^((#chr( 27 )#\[m)?\[[^]]*])( runwar\.[^:]*: )(.*)', '\1 Runwar: \4' );
 
 					// Log messages from any other 3rd party java lib tapping into Log4j will be left alone
 					// Ex:
@@ -1300,9 +1389,9 @@ component accessors="true" singleton {
 				} // End of inputStream
 
 				// When we require Java 8 for CommandBox, we can pass a timeout to waitFor().
-				var exitCode = process.waitFor();
-
-				if( exitCode == 0 ) {
+				serverInfo.exitCode = process.waitFor();
+				
+				if( serverInfo.exitCode == 0 ) {
 					serverInfo.status="running";
 				} else {
 					serverInfo.status="unknown";
@@ -1325,22 +1414,29 @@ component accessors="true" singleton {
 						.line( "Server's output stream closed. It's been stopped elsewhere." )
 						.toConsole();
 					// This will end the readline() call below so the "start" command can finally exit
+					variables.internalInterrupt = true;
 					parentThread.interrupt();
 				}
 			}
 		}
-
+		
+		var serverInterrupted = false;
 		// Block until the process ends and the streaming output thread above is done.
 		if( interactiveStart ) {
 
 			if( !background ) {
 				try {
 
+					// Need to start reading the input stream or we can't detect Ctrl-C on Windows
+					var terminal = shell.getReader().getTerminal();
+					if( terminal.paused() ) {
+							terminal.resume();
+					}
 					variables.waitingOnConsoleStart = true;
 					while( true ) {
 						// For dumb terminals, just sit and wait to be interrupted
 						// Trying to read from a dumb terminal will throw "The handle is invalid" errors
-						if( shell.getReader().getTerminal().getClass().getName() contains 'dumb' ) {
+						if( terminal.getClass().getName() contains 'dumb' ) {
 							sleep( 500 );
 						} else {
 							// Detect user pressing Ctrl-C
@@ -1357,10 +1453,12 @@ component accessors="true" singleton {
 				// user wants to exit this command, they've pressed Ctrl-C
 				} catch ( org.jline.reader.UserInterruptException e ) {
 					consoleLogger.error( 'Stopping server...' );
+					serverInterrupted = true;
 				// user wants to exit the shell, they've pressed Ctrl-D
 				} catch ( org.jline.reader.EndOfFileException e ) {
 					consoleLogger.error( 'Stopping server...' );
 					shell.setKeepRunning( false );
+					serverInterrupted = true;
 				// Something bad happened
 				} catch ( Any e ) {
 					logger.error( '#e.message# #e.detail#' , e.stackTrace );
@@ -1376,6 +1474,13 @@ component accessors="true" singleton {
 			}
 
 			thread action="join" name="#threadName#";
+		}
+		
+		// It's hard to tell the difference between a user hitting Ctrl-C on a console server and the process getting killed elsewhere, which also sends an interrupt to the main thread.
+		// We care abut failing exit codes if the server was interrupted unexpectedly 
+		if( serverInfo.exitCode != 0 && ( !serverInterrupted || variables.internalInterrupt ) ) {
+			consoleLogger.info( '.' );
+			throw( message='Server process returned failing exit code [#serverInfo.exitCode#]', type="commandException", errorcode=serverInfo.exitCode );
 		}
 
 	}
@@ -1674,9 +1779,11 @@ component accessors="true" singleton {
  	 **/
 	function isPortAvailable( host="127.0.0.1", required port ){
 		try {
-			var serverSocket = java.ServerSocket.init( javaCast( "int", arguments.port ),
-													 javaCast( "int", 1 ),
-													 java.InetAddress.getByName( arguments.host ) );
+			var serverSocket = java.serverSocket
+				.init( 
+					javaCast( "int", arguments.port ),
+					javaCast( "int", 1 ),
+					java.InetAddress.getByName( arguments.host ) );
 			serverSocket.close();
 			return true;
 		} catch( java.net.UnknownHostException var e ) {
@@ -1687,6 +1794,10 @@ component accessors="true" singleton {
 			// Same as above-- the IP address/host isn't bound to any local adapters.  Probably a host file entry went missing.
 			if( e.message contains 'Cannot assign requested address' || e.message contains 'Can''t assign requested address' ) {
 				return true;
+			}
+			if( e.message contains 'Permission denied' ) {
+				consoleLogger.debug( e.message);
+				consoleLogger.error( "Permission to bind the port was denied. This likely means you need to run as root or pick a port above 1024.");
 			}
 			// We're assuming that any other error means the address was in use.
 			// Java doesn't provide a specific message or exception type for this unfortunately.
@@ -1708,7 +1819,10 @@ component accessors="true" singleton {
 		} else if( serverInfo.AJPEnable ) {
 			portToCheck = serverInfo.AJPPort;
 		}
-		return !isPortAvailable( serverInfo.host, portToCheck );
+
+		lock name="server-status-check-#portToCheck#" type="exclusive"{
+			return !isPortAvailable( serverInfo.host, portToCheck );
+		}
 	}
 
 	/**
@@ -1987,6 +2101,8 @@ component accessors="true" singleton {
 			'directoryBrowsing' : false,
 			'JVMargs'			: "",
 			'runwarArgs'		: "",
+			'runwarXNIOOptions'	: {},
+			'runwarUndertowOptions'	: {},
 			'cfengine'			: "",
 			'restMappings'		: "",
 			'sessionCookieSecure'	: false,
@@ -2006,7 +2122,9 @@ component accessors="true" singleton {
 			'openBrowser'		: true,
 			'openBrowserURL'	: '',
 			'customServerFolder': '',
-			'welcomeFiles'		: ''
+			'welcomeFiles'		: '',
+			'maxRequests'		: '',
+			'exitCode'			: 0
 		};
 	}
 
@@ -2065,4 +2183,5 @@ component accessors="true" singleton {
 
 		return props;
 	}
+
 }

@@ -131,6 +131,8 @@ component accessors=true {
 					// Fire the watcher up again.
 					retry;
 				// If the thread has been interrupted
+				} catch( java.lang.InterruptedException e ) {
+					// There's nothign to do here.  Just exit the thread!
 				} catch( java.lang.ThreadDeath e ) {
 					// There's nothign to do here.  Just exit the thread!
 				} catch( any e ) {
@@ -148,6 +150,13 @@ component accessors=true {
 			} // end thread
 
 			while( true ){
+				
+				// Need to start reading the input stream or we can't detect Ctrl-C on Windows
+				var terminal = shell.getReader().getTerminal();
+				if( terminal.paused() ) {
+						terminal.resume();
+				}
+				
 				// Detect user pressing Ctrl-C
 				// Any other characters captured will be ignored
 				var line = shell.getReader().readLine();
